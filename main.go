@@ -5,9 +5,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -67,6 +69,14 @@ func main() {
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
 		shutdown()
 	})
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		shutdown()
+		mygo.App.Quit()
+	}()
 	mygo.App.OnSecondInstance(func([]string, string) {
 		if eng != nil {
 			eng.Preview(3 * time.Second)

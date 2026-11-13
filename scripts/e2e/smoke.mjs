@@ -135,16 +135,25 @@ async function main() {
       console.log(`  Saved live GPU window captures to ${screenshotOut}`);
     }
 
-    sock.end();
+    sock.destroy();
     console.log("✓ Live MyGo GPU E2E smoke check passed.");
   } catch (err) {
     console.error("E2E failed:", err);
     if (stderrBuf) console.error("App stderr:\n" + stderrBuf);
     process.exitCode = 1;
   } finally {
-    child.kill("SIGTERM");
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await Promise.race([
+        new Promise((r) => child.once("exit", r)),
+        new Promise((r) => setTimeout(r, 600)),
+      ]);
+      if (child.exitCode === null) {
+        child.kill("SIGKILL");
+      }
+    }
     cleanup();
   }
 }
 
-main();
+main().then(() => process.exit(process.exitCode ?? 0));
