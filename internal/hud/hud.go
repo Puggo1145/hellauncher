@@ -14,6 +14,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/shader"
 
 	"helldriver/internal/catalog"
 	"helldriver/internal/engine"
@@ -23,18 +24,67 @@ import (
 var assetsFS embed.FS
 
 const (
-	overlayWidth  = 440
-	overlayHeight = 560
+	overlayWidth  = 476
+	overlayHeight = 590
 )
 
 var (
 	assetsOnce  sync.Once
 	arrowSVG    *ui.SVG
-	skullBitmap *ui.Bitmap
+	emblemSVG   *ui.SVG
+	spinnerSVG  *ui.SVG
 	svgIcons    map[string]*ui.SVG
+	visorShader *shader.Shader
 )
 
 const arrowPolygonSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><polygon points="13 20 13 15 20 15 20 5 13 5 13 0 0 10 13 20"/></svg>`
+
+const superEarthEmblemSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect x="2" y="2" width="28" height="28" fill="none" stroke="#ffe900" stroke-width="2.4"/>
+  <polygon fill="#ffe900" points="16,5 19,12 26,12 20.5,16.5 22.5,24 16,19.5 9.5,24 11.5,16.5 6,12 13,12"/>
+</svg>`
+
+const tacticalSpinnerSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none">
+  <circle cx="10" cy="10" r="7.5" stroke="#ffe900" stroke-opacity="0.28" stroke-width="2.6"/>
+  <path d="M10 2.5 A7.5 7.5 0 0 1 17.5 10" stroke="#ffffff" stroke-width="2.6" stroke-linecap="square"/>
+</svg>`
+
+// visorLensShaderSrc runs natively on Metal / Direct3D 11 via mygo/ui/shader:
+// it projects the upper-left HUD onto a spherical helmet visor dome (optical
+// center to the right-middle of the panel), adding genuine curved visor barrel
+// geometry, subtle peripheral lens dispersion, and fine holographic scanlines.
+const visorLensShaderSrc = `package main
+
+func LayerEffect(pos vec2) vec4 {
+	sz := rectSize()
+	if sz.x <= 1.0 || sz.y <= 1.0 {
+		return layerSample(pos)
+	}
+	nx := pos.x / sz.x
+	ny := pos.y / sz.y
+
+	// Optical center of the helmet visor sits to the right of the upper-left HUD
+	vx := 1.08 - nx
+	vy := 0.52 - ny
+	r2 := vx*vx + vy*vy
+
+	offX := (r2 - 0.85) * vx * 11.5
+	offY := (r2 - 0.45) * vy * 14.5
+	src := vec2(pos.x-offX, pos.y-offY)
+
+	// Subtle peripheral polycarbonate visor chromatic dispersion near outer rim
+	disp := vx * vx * 0.36
+	cR := layerSample(src + vec2(disp, 0))
+	cG := layerSample(src)
+	cB := layerSample(src - vec2(disp, 0))
+	a := max(cG.a, max(cR.a, cB.a))
+	col := vec4(cR.r, cG.g, cB.b, a)
+
+	// Fine holographic visor scanline modulation
+	scan := 0.968 + 0.032*sin(pos.y*2.35)
+	return vec4(col.rgb*scan, col.a)
+}
+`
 
 var inlineTacticalSVGs = map[string]string{
 	"tactical-chrome": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 126 126" fill="#fff">
@@ -72,6 +122,9 @@ func ensureAssets() {
 		}
 
 		arrowSVG = ui.MustParseSVG([]byte(arrowPolygonSVG))
+		emblemSVG = ui.MustParseSVG([]byte(superEarthEmblemSVG))
+		spinnerSVG = ui.MustParseSVG([]byte(tacticalSpinnerSVG))
+		visorShader = shader.MustCompile(visorLensShaderSrc)
 		svgIcons = make(map[string]*ui.SVG, 24)
 
 		for key, raw := range inlineTacticalSVGs {
@@ -91,20 +144,13 @@ func ensureAssets() {
 			if err != nil {
 				continue
 			}
-			switch strings.ToLower(path.Ext(name)) {
-			case ".svg":
+			if strings.ToLower(path.Ext(name)) == ".svg" {
 				parsed, pErr := ui.ParseSVG(data)
 				if pErr != nil {
 					slog.Warn("hud parse svg failed", "icon", name, "err", pErr)
 					continue
 				}
 				svgIcons[name] = parsed
-			case ".png":
-				if name == "skull-header.png" {
-					if bmp, bErr := ui.DecodeBitmap(data); bErr == nil {
-						skullBitmap = bmp
-					}
-				}
 			}
 		}
 	})
@@ -113,23 +159,23 @@ func ensureAssets() {
 func hudTheme() *ui.Theme {
 	t := ui.DarkTheme()
 	accent := ui.Hex("#ffe900")
-	t.Background = ui.RGBA(11, 14, 19, 0.92)
-	t.Surface = ui.RGBA(20, 25, 33, 0.94)
-	t.SurfaceHover = ui.RGBA(28, 35, 46, 0.96)
-	t.SurfacePressed = ui.RGBA(34, 42, 54, 0.98)
-	t.Border = ui.RGBA(255, 233, 0, 0.34)
-	t.Text = ui.Hex("#f3f5f8")
-	t.TextMuted = ui.Hex("#939cab")
+	t.Background = ui.RGBA(15, 19, 24, 0.88)
+	t.Surface = ui.RGBA(18, 23, 29, 0.86)
+	t.SurfaceHover = ui.RGBA(24, 31, 39, 0.92)
+	t.SurfacePressed = ui.RGBA(28, 36, 46, 0.96)
+	t.Border = ui.RGBA(255, 255, 255, 0.10)
+	t.Text = ui.Hex("#f5f8fb")
+	t.TextMuted = ui.RGBA(235, 242, 248, 0.56)
 	t.Accent = accent
 	t.AccentHover = accent
 	t.AccentPressed = accent
-	t.AccentText = ui.Hex("#0b0d12")
+	t.AccentText = ui.Hex("#0b0f14")
 	// Critical: overlay uses ShowInactive(), so InactiveAccent MUST equal Accent.
 	t.InactiveAccent = accent
-	t.Danger = ui.Hex("#ff453a")
+	t.Danger = ui.Hex("#ff3b30")
 	t.Success = ui.Hex("#42d674")
 	t.Warning = accent
-	t.Radius = 4
+	t.Radius = 0
 	t.Font = "FS Sinclair"
 	t.FontSize = 13
 	return t
@@ -149,8 +195,8 @@ func NewOverlay() *Overlay {
 	ensureAssets()
 
 	disp := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint())
-	initX := disp.WorkArea.X + 16
-	initY := disp.WorkArea.Y + 12
+	initX := disp.WorkArea.X + 14
+	initY := disp.WorkArea.Y + 10
 
 	o := &Overlay{
 		snap: engine.Snapshot{
@@ -203,7 +249,7 @@ func (o *Overlay) Apply(snap engine.Snapshot) {
 		if snap.Phase != engine.PhaseIdle {
 			if wasIdle {
 				disp := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint())
-				o.win.SetPosition(disp.WorkArea.X+16, disp.WorkArea.Y+12)
+				o.win.SetPosition(disp.WorkArea.X+14, disp.WorkArea.Y+10)
 			}
 			if !o.shown {
 				o.shown = true
@@ -238,8 +284,17 @@ func View(c *ui.Context, snap engine.Snapshot) {
 		visibleTarget = 0.0
 	}
 
-	outer := ui.Column(c.Key("hud-shell")).Fill().Padding(14, 16)
-	vis := outer.Animate("vis", visibleTarget, 150*time.Millisecond)
+	outer := ui.Column(c.Key("hud-shell")).Fill().Padding(18, 20)
+	gpuReady := ui.Local(outer, "gpu-accel", func() bool { return false })
+	svcs := c.Services()
+	outer.Draw(func(p *ui.Painter, _ ui.Rect) {
+		if acc := p.Accelerated(); acc != *gpuReady {
+			*gpuReady = acc
+			svcs.Invalidate()
+		}
+	})
+
+	vis := outer.Animate("vis", visibleTarget, 160*time.Millisecond)
 	if vis <= 0.01 && snap.Phase == engine.PhaseIdle {
 		return
 	}
@@ -247,40 +302,42 @@ func View(c *ui.Context, snap engine.Snapshot) {
 	errProgress := outer.Animate("err-seq", float32(snap.ErrorSeq), 260*time.Millisecond)
 	errFlash := clamp01(float32(snap.ErrorSeq) - errProgress)
 	shakeX := float32(math.Sin(float64(errFlash)*math.Pi*4)) * 7.0 * errFlash
-	slideX := (1.0 - vis) * -28.0
+
+	stepProgress := outer.Animate("step-seq", float32(snap.StepSeq), 150*time.Millisecond)
+	stepPulse := clamp01(float32(snap.StepSeq) - stepProgress)
+
+	slideX := (1.0 - vis) * -34.0
 
 	outer.Children(func() {
-		cardBorder := ui.RGBA(255, 233, 0, 0.42)
-		switch {
-		case errFlash > 0.05:
-			cardBorder = ui.Hex("#ff453a")
-		case snap.Phase == engine.PhaseArmed:
-			cardBorder = ui.Hex("#ffe900")
-		case snap.Phase == engine.PhaseDeployed:
-			cardBorder = ui.Hex("#42d674")
-		}
-
-		card := ui.Column(c.Key("visor-card")).
-			Width(392).
-			Background(t.Background).
-			Border(1.5, cardBorder).
-			BorderStartWidth(4).
-			Radius(4).
-			Opacity(vis).
-			Padding(12, 14).
-			Gap(8)
+		hudStack := ui.Column(c.Key("visor-stack")).
+			Width(404).
+			Padding(8, 12, 10, 10).
+			Gap(5).
+			Opacity(vis)
 
 		if snap.Loadout.Settings.VisorCurved {
-			card.TransformOrigin(0, 0.5).
-				Perspective(920).
-				RotateY(8).
+			// NOTE: In mygo/ui, transforms chain post-multiply (Then):
+			// RotateY / RotateX MUST precede Perspective(dist) so perspective
+			// projects the rotated 3D plane! Plus visorShader adds true optical
+			// helmet-glass spherical curvature & scanlines on Metal / D3D11.
+			hudStack.
+				TransformOrigin(0, 0.14).
+				RotateY(11.5).
+				RotateX(-1.2).
+				Perspective(580).
 				Translate(slideX+shakeX, 0)
+			if *gpuReady && visorShader != nil {
+				hudStack.Effect(visorShader.Effect(shader.Options{
+					MaxSampleOffset: ui.Point{X: 28, Y: 28},
+				}))
+			}
 		} else {
-			card.Translate(slideX+shakeX, 0)
+			hudStack.Translate(slideX+shakeX, 0)
 		}
 
-		card.Children(func() {
-			renderHeader(c, t, snap, errFlash)
+		hudStack.Children(func() {
+			renderVisorCornerReticle(c)
+			renderHeaderBar(c, t, snap, errFlash)
 
 			if runtime.GOOS == "darwin" && !snap.Trusted {
 				renderUntrustedBanner(c)
@@ -290,77 +347,153 @@ func View(c *ui.Context, snap engine.Snapshot) {
 				renderArmedBanner(c)
 			}
 
-			renderStratagemRows(c, t, snap)
-			renderLiveTypedFooter(c, t, snap)
+			renderStratagemStrips(c, t, snap, errFlash, stepPulse)
+			renderLiveInputFooter(c, t, snap, stepPulse)
 		})
 	})
 }
 
-func renderHeader(c *ui.Context, t *ui.Theme, snap engine.Snapshot, errFlash float32) {
-	badgeText, badgeBg, badgeFg := headerBadge(snap, errFlash)
+// renderVisorCornerReticle paints the floating optical L-bracket + tick `[▸`
+// at the upper-left corner of the helmet HUD.
+func renderVisorCornerReticle(c *ui.Context) {
+	ui.Row(c.Key("visor-reticle")).
+		Height(12).
+		AlignItems(ui.Center).
+		Translate(-6, 1).
+		DrawOver(func(p *ui.Painter, r ui.Rect) {
+			shadowCol := ui.RGBA(0, 0, 0, 0.72)
+			bracketCol := ui.RGBA(255, 233, 0, 0.88)
+			dimCol := ui.RGBA(255, 255, 255, 0.48)
+			// Crisp dark shadow backing so reticle reads over both light & dark desktops
+			p.Fill(ui.Rect{X: r.X + 1, Y: r.Y + 1, W: 9, H: 1.8}, shadowCol, 0)
+			p.Fill(ui.Rect{X: r.X + 1, Y: r.Y + 1, W: 1.8, H: 16}, shadowCol, 0)
+			// Top horizontal + left vertical + bottom subtle tick
+			p.Fill(ui.Rect{X: r.X, Y: r.Y, W: 9, H: 1.6}, bracketCol, 0)
+			p.Fill(ui.Rect{X: r.X, Y: r.Y, W: 1.6, H: 16}, bracketCol, 0)
+			p.Fill(ui.Rect{X: r.X, Y: r.Y + 14.5, W: 6, H: 1.4}, dimCol, 0)
+		}).
+		Children(func() {
+			ui.Box(c).Width(7)
+			ui.Text(c, "▸").
+				FontSize(9.5).
+				Bold().
+				TextColor(ui.RGBA(255, 233, 0, 0.90)).
+				TextShadow(0, 1, 2, ui.RGBA(0, 0, 0, 0.90))
+		})
+}
 
-	ui.Row(c.Key("hdr")).AlignItems(ui.Center).Gap(8).Children(func() {
-		if skullBitmap != nil {
-			ui.Image(c, skullBitmap).Size(22, 22)
+func renderHeaderBar(c *ui.Context, t *ui.Theme, snap engine.Snapshot, errFlash float32) {
+	leftBar := t.Accent
+	hdrBg := ui.RGBA(15, 19, 24, 0.90)
+	glowCol := ui.Transparent
+
+	switch {
+	case errFlash > 0.08:
+		leftBar = ui.Hex("#ff3b30")
+		hdrBg = ui.RGBA(88, 20, 20, 0.92)
+		glowCol = ui.RGBA(255, 59, 48, 0.35)
+	case snap.Phase == engine.PhaseDeployed:
+		leftBar = ui.Hex("#ffffff")
+		hdrBg = ui.RGBA(30, 38, 46, 0.95)
+		glowCol = ui.RGBA(255, 233, 0, 0.32)
+	case snap.Phase == engine.PhaseDeploying || snap.Phase == engine.PhaseArmed:
+		leftBar = t.Accent
+		hdrBg = ui.RGBA(24, 31, 39, 0.94)
+		glowCol = ui.RGBA(255, 233, 0, 0.26)
+	}
+
+	hdr := ui.Row(c.Key("hdr-strip")).
+		Padding(7, 10, 7, 12).
+		AlignItems(ui.Center).
+		Gap(8).
+		Background(hdrBg).
+		Border(1, ui.RGBA(255, 255, 255, 0.12)).
+		Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.50))
+	paintLeftBar(hdr, 3.5, leftBar)
+
+	if glowCol != ui.Transparent {
+		hdr.Shadow(0, 0, 18, 0, glowCol)
+	}
+
+	badgeText, badgeBg, badgeBorder, badgeFg := headerBadgeStyle(snap, errFlash)
+
+	hdr.Children(func() {
+		if emblemSVG != nil {
+			ui.Image(c, emblemSVG).Size(20, 20)
 		}
-		ui.Column(c).Grow(1).Gap(1).Children(func() {
-			ui.Text(c, "STRATAGEMS // 战略配备").FontSize(14).Bold().TextColor(t.Accent)
-			ui.Text(c, "SUPER EARTH TACTICAL TERMINAL").FontSize(9).TextColor(t.TextMuted)
-		})
-		ui.Row(c).
-			Padding(3, 8).
-			Radius(2).
+		ui.Text(c, "战略配备").
+			FontSize(15.5).
+			Bold().
+			TextColor(ui.Hex("#ffffff")).
+			TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.92))
+		ui.Text(c, "STRATAGEMS").
+			FontSize(11).
+			Bold().
+			TextColor(ui.RGBA(255, 255, 255, 0.50)).
+			Grow(1)
+
+		badge := ui.Row(c.Key("hdr-badge")).
+			Padding(2, 8).
 			Background(badgeBg).
-			Children(func() {
-				ui.Text(c, badgeText).FontSize(11).Bold().TextColor(badgeFg)
-			})
+			Border(1, badgeBorder)
+		if snap.Phase == engine.PhaseDeploying || snap.Phase == engine.PhaseArmed {
+			p := badge.Loop("badge-pulse", 850*time.Millisecond, ui.Linear)
+			alpha := 0.78 + 0.22*float32(math.Sin(float64(p)*2*math.Pi))
+			badge.Opacity(alpha).Shadow(0, 0, 10, 0, ui.RGBA(255, 233, 0, 0.45))
+		}
+		badge.Children(func() {
+			ui.Text(c, badgeText).FontSize(11).Bold().TextColor(badgeFg)
+		})
 	})
-	ui.Box(c).Height(1).Background(ui.RGBA(255, 233, 0, 0.22))
 }
 
-func headerBadge(snap engine.Snapshot, errFlash float32) (label string, bg, fg ui.Color) {
-	if errFlash > 0.1 {
-		return "指令错误", ui.Hex("#ff453a"), ui.Hex("#ffffff")
+func headerBadgeStyle(snap engine.Snapshot, errFlash float32) (label string, bg, border, fg ui.Color) {
+	if errFlash > 0.08 {
+		return "指令错误", ui.RGBA(255, 59, 48, 0.30), ui.Hex("#ff6b6b"), ui.Hex("#ffffff")
 	}
 	switch snap.Phase {
 	case engine.PhaseArmed:
-		return "信标已握持", ui.Hex("#ffe900"), ui.Hex("#0b0d12")
+		return "信标已握持", ui.Hex("#ffe900"), ui.Hex("#ffffff"), ui.Hex("#0b0f14")
 	case engine.PhaseDeploying:
-		return "空投部署中", ui.RGBA(255, 233, 0, 0.22), ui.Hex("#ffe900")
+		return "空投部署中", ui.RGBA(255, 233, 0, 0.28), ui.Hex("#ffe900"), ui.Hex("#fffbe0")
 	case engine.PhaseDeployed:
-		return "✓ 已就绪", ui.RGBA(66, 214, 116, 0.24), ui.Hex("#42d674")
+		return "✓ 已就绪", ui.Hex("#ffe900"), ui.Hex("#ffffff"), ui.Hex("#0b0f14")
 	case engine.PhasePreview:
-		return "终端就绪", ui.RGBA(255, 255, 255, 0.10), ui.Hex("#e5e8ef")
+		return "终端就绪", ui.RGBA(79, 179, 208, 0.22), ui.Hex("#7dd3fc"), ui.Hex("#e0f2fe")
 	default:
 		if len(snap.Typed) > 0 {
-			return fmt.Sprintf("输入中 %d", len(snap.Typed)), ui.RGBA(255, 233, 0, 0.20), ui.Hex("#ffe900")
+			return fmt.Sprintf("输入中 %d", len(snap.Typed)), ui.RGBA(255, 233, 0, 0.22), ui.Hex("#ffe900"), ui.Hex("#ffe900")
 		}
-		return "WASD // ↑↓←→", ui.RGBA(255, 255, 255, 0.08), ui.Hex("#cfd5df")
+		return "WASD // ↑↓←→", ui.RGBA(255, 233, 0, 0.16), ui.Hex("#ffe900"), ui.Hex("#ffe900")
 	}
 }
 
 func renderUntrustedBanner(c *ui.Context) {
-	ui.Row(c.Key("untrusted-banner")).
-		Padding(6, 10).
-		Radius(3).
-		Background(ui.RGBA(255, 69, 58, 0.18)).
-		Border(1, ui.RGBA(255, 69, 58, 0.55)).
-		Children(func() {
-			ui.Text(c, "⚠ 未获辅助功能权限：请在菜单栏点击「授予辅助功能权限…」").
-				FontSize(11).
-				TextColor(ui.Hex("#ffb4ae"))
-		})
+	b := ui.Row(c.Key("untrusted-banner")).
+		Padding(6, 10, 6, 12).
+		Gap(7).
+		AlignItems(ui.Center).
+		Background(ui.RGBA(145, 34, 28, 0.92)).
+		Border(1, ui.RGBA(255, 255, 255, 0.14)).
+		Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.44))
+	paintLeftBar(b, 3, ui.Hex("#ff6b6b"))
+	b.Children(func() {
+		ui.Box(c).Size(7, 7).Radius(4).Background(ui.Hex("#ff6b6b"))
+		ui.Text(c, "未获辅助功能权限：请在菜单栏点击「授予辅助功能权限…」").
+			FontSize(11).
+			TextColor(ui.Hex("#ffe4e4"))
+	})
 }
 
 func renderArmedBanner(c *ui.Context) {
 	banner := ui.Row(c.Key("armed-banner")).
-		Padding(7, 10).
-		Radius(3).
-		Background(ui.RGBA(255, 233, 0, 0.16)).
-		Border(1, ui.Hex("#ffe900"))
+		Padding(6, 10, 6, 12).
+		Background(ui.RGBA(46, 40, 10, 0.94)).
+		Border(1, ui.RGBA(255, 233, 0, 0.42)).
+		Shadow(0, 0, 16, 0, ui.RGBA(255, 233, 0, 0.30))
+	paintLeftBar(banner, 3.5, ui.Hex("#ffe900"))
 	pulse := banner.Loop("armed-pulse", 900*time.Millisecond, ui.Linear)
-	alpha := 0.72 + 0.28*float32(math.Sin(float64(pulse)*2*math.Pi))
-	banner.Opacity(alpha).Children(func() {
+	banner.Opacity(0.80 + 0.20*float32(math.Sin(float64(pulse)*2*math.Pi))).Children(func() {
 		ui.Text(c, "⊕ 信标已握持 · 左键点击目标位置空投 · 右键/ESC 取消").
 			FontSize(11.5).
 			Bold().
@@ -368,10 +501,10 @@ func renderArmedBanner(c *ui.Context) {
 	})
 }
 
-func renderStratagemRows(c *ui.Context, t *ui.Theme, snap engine.Snapshot) {
+func renderStratagemStrips(c *ui.Context, t *ui.Theme, snap engine.Snapshot, errFlash, stepPulse float32) {
 	isLockedPhase := snap.Phase == engine.PhaseArmed || snap.Phase == engine.PhaseDeploying || snap.Phase == engine.PhaseDeployed
 
-	ui.Column(c.Key("strat-list")).Gap(6).Children(func() {
+	ui.Column(c.Key("strat-list")).Gap(4).Children(func() {
 		shown := 0
 		for _, st := range snap.Loadout.Stratagems {
 			if !st.Enabled {
@@ -388,124 +521,226 @@ func renderStratagemRows(c *ui.Context, t *ui.Theme, snap engine.Snapshot) {
 				dimmed = true
 			}
 
-			rowBg := ui.RGBA(22, 27, 36, 0.86)
-			rowBorder := ui.RGBA(255, 255, 255, 0.08)
-			switch {
-			case isTarget && snap.Phase == engine.PhaseDeployed:
-				rowBg = ui.RGBA(22, 52, 36, 0.90)
-				rowBorder = ui.Hex("#42d674")
-			case isTarget:
-				rowBg = ui.RGBA(54, 49, 16, 0.90)
-				rowBorder = ui.Hex("#ffe900")
-			case len(snap.Typed) > 0 && matchesPrefix:
-				rowBg = ui.RGBA(32, 37, 46, 0.95)
-				rowBorder = ui.RGBA(255, 233, 0, 0.45)
+			targetShift := float32(0)
+			if isTarget {
+				targetShift = 6
+			} else if len(snap.Typed) > 0 && matchesPrefix {
+				targetShift = 3.5
 			}
 
-			rowOpacity := float32(1.0)
+			targetOpacity := float32(1.0)
 			if dimmed {
-				rowOpacity = 0.34
+				targetOpacity = 0.24
 			}
 
-			row := ui.Column(c.Key("strat-"+st.ID)).
-				Padding(7, 9).
-				Gap(5).
-				Radius(3).
-				Background(rowBg).
-				Border(1, rowBorder).
-				Opacity(rowOpacity)
+			strip := ui.Column(c.Key("strat-"+st.ID)).
+				Padding(5, 10, 6, 9).
+				Gap(4).
+				Border(1, ui.RGBA(255, 255, 255, 0.08)).
+				Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.45))
 
-			row.Children(func() {
+			shiftX := strip.Animate("shift", targetShift, 130*time.Millisecond)
+			rowAlpha := strip.Animate("alpha", targetOpacity, 120*time.Millisecond)
+			strip.Translate(shiftX, 0).Opacity(rowAlpha)
+
+			switch {
+			case errFlash > 0.08:
+				strip.Background(ui.RGBA(128, 22, 22, 0.82))
+				paintLeftBar(strip, 3, ui.Hex("#ff3b30"))
+			case isTarget && snap.Phase == engine.PhaseDeployed:
+				strip.LinearGradient(ui.LinearGradient{
+					Angle: 90,
+					Stops: []ui.GradientStop{
+						{Color: ui.RGBA(255, 233, 0, 0.34), At: 0},
+						{Color: ui.RGBA(28, 36, 46, 0.96), At: 0.68},
+						{Color: ui.RGBA(22, 29, 38, 0.96), At: 1},
+					},
+				}).Shadow(0, 0, 22, 0, ui.RGBA(255, 233, 0, 0.36))
+				paintLeftBar(strip, 4, ui.Hex("#ffffff"))
+			case isTarget:
+				strip.LinearGradient(ui.LinearGradient{
+					Angle: 90,
+					Stops: []ui.GradientStop{
+						{Color: ui.RGBA(255, 233, 0, 0.22), At: 0},
+						{Color: ui.RGBA(25, 33, 42, 0.96), At: 0.68},
+						{Color: ui.RGBA(18, 24, 32, 0.96), At: 1},
+					},
+				}).Shadow(0, 0, 18, 0, ui.RGBA(255, 233, 0, 0.25))
+				paintLeftBar(strip, 4, t.Accent)
+			case len(snap.Typed) > 0 && matchesPrefix:
+				strip.Background(ui.RGBA(28, 35, 44, 0.94))
+				paintLeftBar(strip, 3, t.Accent)
+			default:
+				strip.Background(t.Surface)
+			}
+
+			strip.Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(9).Children(func() {
-					renderCategoryIconBox(c, st)
+					renderCategoryIconBox(c, st, isTarget)
 
-					ui.Column(c).Grow(1).Gap(3).Children(func() {
+					ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 						ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
-							ui.Text(c, st.Name).FontSize(13).Bold().TextColor(t.Text).SingleLine().Grow(1)
-							subText, subCol := rowSubtitle(st, isTarget, snap.Phase, t)
-							ui.Text(c, subText).FontSize(10.5).TextColor(subCol).SingleLine()
+							ui.Text(c, st.Name).
+								FontSize(14).
+								Bold().
+								TextColor(ui.Hex("#ffffff")).
+								TextShadow(0, 1, 3, ui.RGBA(0, 0, 0, 0.95)).
+								SingleLine().
+								Grow(1)
+
+							renderRowSubtitle(c, st, isTarget, snap.Phase, t)
 						})
 
-						ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+						ui.Row(c).Gap(5).Height(18).AlignItems(ui.Center).Children(func() {
 							for idx, dir := range st.Code {
 								matched := isTarget || (matchesPrefix && idx < len(snap.Typed))
-								col := ui.Hex("#d8dde6")
-								if matched {
-									col = t.Accent
-								}
-								renderDirectionArrow(c.Key(idx), dir, 13, col)
+								justMatched := !isTarget && matchesPrefix && len(snap.Typed) > 0 && idx == len(snap.Typed)-1 && stepPulse > 0.02
+								renderDirectionArrow(c.Key(idx), dir, 14.5, matched, justMatched, stepPulse)
 							}
 							if st.Delivery == catalog.DeliveryBeaconClick {
-								ui.Text(c, "⊕信标").FontSize(9.5).TextColor(ui.Hex("#9ad7ff"))
+								ui.Spacer(c)
+								ui.Text(c, "⊕信标").FontSize(10).Bold().TextColor(ui.Hex("#7dd3fc"))
 							}
 						})
 					})
 				})
 
 				if isTarget && snap.Phase == engine.PhaseDeploying {
-					track := ui.Row(c.Key("deploy-sweep")).Height(3).Radius(2).Background(ui.RGBA(255, 233, 0, 0.18))
-					prog := track.Loop("sweep", 650*time.Millisecond, ui.Linear)
+					track := ui.Row(c.Key("deploy-sweep")).Height(2.5).Background(ui.RGBA(255, 233, 0, 0.16))
+					prog := track.Loop("sweep", 700*time.Millisecond, ui.Linear)
 					track.Children(func() {
 						ui.Box(c).
-							WidthPercent(42).
-							Height(3).
-							Radius(2).
-							Background(t.Accent).
-							TranslatePercent(prog*140, 0)
+							WidthPercent(46).
+							Height(2.5).
+							LinearGradient(ui.LinearGradient{
+								Angle: 90,
+								Stops: []ui.GradientStop{
+									{Color: ui.RGBA(255, 233, 0, 0.0), At: 0},
+									{Color: ui.Hex("#ffe900"), At: 0.65},
+									{Color: ui.Hex("#ffffff"), At: 1.0},
+								},
+							}).
+							Shadow(0, 0, 8, 0, ui.RGBA(255, 233, 0, 0.90)).
+							TranslatePercent(-100+prog*320, 0)
 					})
 				} else if isTarget && snap.Phase == engine.PhaseDeployed {
-					ui.Box(c.Key("deploy-done")).Height(3).Radius(2).Background(ui.Hex("#42d674"))
+					ui.Box(c.Key("deploy-done")).
+						Height(2.5).
+						Background(t.Accent).
+						Shadow(0, 0, 10, 0, ui.RGBA(255, 233, 0, 0.90))
 				}
 			})
 		}
 
 		if shown == 0 {
-			ui.Text(c, "暂无已启用的战略配备，请在菜单栏打开「军械库」配置。").
-				FontSize(12).
-				TextColor(t.TextMuted).
-				Padding(10, 4)
+			ui.Row(c).Padding(10, 12).Background(t.Surface).Children(func() {
+				ui.Text(c, "暂无已启用的战略配备，请在菜单栏打开「军械库」配置。").
+					FontSize(12).
+					TextColor(t.TextMuted)
+			})
 		}
 	})
 }
 
-func renderCategoryIconBox(c *ui.Context, st catalog.Stratagem) {
-	bg, border := categoryPalette(st.Category)
-	ui.Row(c).
-		Size(36, 36).
+func renderCategoryIconBox(c *ui.Context, st catalog.Stratagem, isTarget bool) {
+	border := categoryBorderColor(st.Category)
+	if isTarget {
+		border = ui.Hex("#ffe900")
+	}
+	box := ui.Row(c).
+		Size(42, 42).
+		Shrink(0).
 		Center().
-		Radius(3).
-		Background(bg).
-		Border(1, border).
-		Children(func() {
-			if icon := lookupStratagemIcon(st.Icon); icon != nil {
-				ui.Image(c, icon).Size(24, 24)
-			} else {
-				ui.Text(c, "✪").FontSize(15).Bold().TextColor(ui.Hex("#ffe900"))
-			}
-		})
-}
-
-func renderLiveTypedFooter(c *ui.Context, t *ui.Theme, snap engine.Snapshot) {
-	ui.Box(c).Height(1).Background(ui.RGBA(255, 255, 255, 0.10))
-	ui.Row(c.Key("footer")).AlignItems(ui.Center).Gap(8).Children(func() {
-		ui.Row(c).Grow(1).Gap(5).AlignItems(ui.Center).Children(func() {
-			if len(snap.Typed) == 0 {
-				ui.Text(c, "等待输入方向指令…").FontSize(11).TextColor(t.TextMuted)
-			} else {
-				for idx, dir := range snap.Typed {
-					renderDirectionArrow(c.Key(idx), dir, 14, t.Accent)
-				}
-			}
-		})
-		ui.Text(c, footerHint(snap)).FontSize(10.5).TextColor(t.TextMuted)
+		Background(ui.RGBA(10, 13, 17, 0.95)).
+		Border(2.5, border)
+	if isTarget {
+		box.Shadow(0, 0, 10, 0, ui.RGBA(255, 233, 0, 0.38))
+	}
+	box.Children(func() {
+		if icon := lookupStratagemIcon(st.Icon); icon != nil {
+			ui.Image(c, icon).Size(32, 32)
+		} else {
+			ui.Text(c, "✪").FontSize(16).Bold().TextColor(ui.Hex("#ffe900"))
+		}
 	})
 }
 
-func renderDirectionArrow(c *ui.Context, dir catalog.Dir, size float32, col ui.Color) {
+func renderRowSubtitle(c *ui.Context, st catalog.Stratagem, isTarget bool, phase engine.Phase, t *ui.Theme) {
+	if isTarget {
+		switch phase {
+		case engine.PhaseArmed:
+			ui.Text(c, "等待左键投掷信标…").FontSize(10.5).Bold().TextColor(t.Accent).SingleLine()
+			return
+		case engine.PhaseDeploying:
+			label := "正在唤醒窗口…"
+			if len(st.Steps) > 0 && st.Steps[0].Kind == catalog.StepCloseActiveWindow {
+				label = "正在执行清场…"
+			}
+			ui.Row(c.Key("spin-row")).AlignItems(ui.Center).Gap(5).Children(func() {
+				if spinnerSVG != nil {
+					sp := ui.Image(c.Key("sp"), spinnerSVG).Size(10, 10)
+					turn := sp.Loop("turn", 580*time.Millisecond, ui.Linear)
+					sp.Rotate(turn * 360)
+				}
+				ui.Text(c, label).FontSize(10.5).Bold().TextColor(t.Accent).SingleLine()
+			})
+			return
+		case engine.PhaseDeployed:
+			ui.Text(c, "✓ 已就绪 DEPLOYED").FontSize(10.5).Bold().TextColor(t.Accent).SingleLine()
+			return
+		}
+	}
+	ui.Text(c, st.Subtitle).FontSize(10.5).TextColor(t.TextMuted).SingleLine()
+}
+
+func renderLiveInputFooter(c *ui.Context, t *ui.Theme, snap engine.Snapshot, stepPulse float32) {
+	footer := ui.Row(c.Key("footer-strip")).
+		Padding(5, 10, 5, 12).
+		AlignItems(ui.Center).
+		Gap(8).
+		Background(ui.RGBA(12, 16, 20, 0.90)).
+		Border(1, ui.RGBA(255, 255, 255, 0.09)).
+		Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.44))
+	paintLeftBar(footer, 3, ui.RGBA(255, 233, 0, 0.72))
+	footer.Children(func() {
+		ui.Row(c).Grow(1).Gap(5).Height(18).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "指令序列:").FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.55))
+			if len(snap.Typed) == 0 {
+				ui.Text(c, "等待输入方向指令…").FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.36))
+			} else {
+				for idx, dir := range snap.Typed {
+					just := idx == len(snap.Typed)-1 && stepPulse > 0.02
+					renderDirectionArrow(c.Key(idx), dir, 14, true, just, stepPulse)
+				}
+			}
+		})
+		ui.Text(c, footerHint(snap)).FontSize(10.5).Bold().TextColor(ui.RGBA(255, 233, 0, 0.82)).SingleLine()
+	})
+}
+
+func paintLeftBar(el ui.Element, width float32, col ui.Color) {
+	if width <= 0 || col.A == 0 {
+		return
+	}
+	el.DrawOver(func(p *ui.Painter, r ui.Rect) {
+		p.Fill(ui.Rect{X: r.X, Y: r.Y, W: width, H: r.H}, col, 0)
+	})
+}
+
+func renderDirectionArrow(c *ui.Context, dir catalog.Dir, size float32, matched, justMatched bool, stepPulse float32) {
+	col := ui.RGBA(255, 255, 255, 0.42)
+	if matched {
+		col = ui.Hex("#ffe900")
+		if justMatched {
+			col = col.Mix(ui.Hex("#ffffff"), stepPulse)
+		}
+	}
+
 	if arrowSVG == nil {
 		ui.Text(c, dir.Arrow()).FontSize(size).Bold().TextColor(col)
 		return
 	}
+
 	var rot float32
 	switch dir {
 	case catalog.DirLeft:
@@ -517,7 +752,17 @@ func renderDirectionArrow(c *ui.Context, dir catalog.Dir, size float32, col ui.C
 	case catalog.DirDown:
 		rot = -90
 	}
-	ui.Icon(c, arrowSVG).FontSize(size).Rotate(rot).TextColor(col)
+
+	el := ui.Icon(c, arrowSVG).FontSize(size).Rotate(rot).TextColor(col)
+	if matched {
+		el.TextShadow(0, 0, 6, ui.RGBA(255, 233, 0, 0.90))
+		if justMatched {
+			s := 1.0 + 0.36*stepPulse
+			el.Scale(s, s)
+		}
+	} else {
+		el.TextShadow(1, 2, 1, ui.RGBA(0, 0, 0, 0.88))
+	}
 }
 
 func lookupStratagemIcon(name string) *ui.SVG {
@@ -530,34 +775,17 @@ func lookupStratagemIcon(name string) *ui.SVG {
 	return nil
 }
 
-func categoryPalette(cat catalog.Category) (bg, border ui.Color) {
+func categoryBorderColor(cat catalog.Category) ui.Color {
 	switch cat {
 	case catalog.CategoryRed:
-		return ui.RGBA(145, 38, 34, 0.36), ui.Hex("#e05347")
+		return ui.Hex("#d56152")
 	case catalog.CategoryGreen:
-		return ui.RGBA(56, 118, 58, 0.36), ui.Hex("#67b85c")
+		return ui.Hex("#679452")
 	case catalog.CategoryYellow:
-		return ui.RGBA(150, 126, 24, 0.36), ui.Hex("#e5c538")
+		return ui.Hex("#c9b268")
 	default:
-		return ui.RGBA(36, 98, 134, 0.36), ui.Hex("#4fb3d0")
+		return ui.Hex("#4fb3d0")
 	}
-}
-
-func rowSubtitle(st catalog.Stratagem, isTarget bool, phase engine.Phase, t *ui.Theme) (string, ui.Color) {
-	if isTarget {
-		switch phase {
-		case engine.PhaseArmed:
-			return "等待左键投掷信标…", t.Accent
-		case engine.PhaseDeploying:
-			if len(st.Steps) > 0 && st.Steps[0].Kind == catalog.StepCloseActiveWindow {
-				return "正在执行清场…", t.Accent
-			}
-			return "正在唤醒窗口…", t.Accent
-		case engine.PhaseDeployed:
-			return "✓ 已就绪 DEPLOYED", ui.Hex("#42d674")
-		}
-	}
-	return st.Subtitle, t.TextMuted
 }
 
 func footerHint(snap engine.Snapshot) string {
@@ -565,7 +793,7 @@ func footerHint(snap engine.Snapshot) string {
 	case engine.PhaseArmed:
 		return "左键空投 · 右键/ESC 取消"
 	case engine.PhaseDeploying:
-		return "战备空投部署中…"
+		return "战备部署中 · 窗口出现后收起"
 	case engine.PhaseDeployed:
 		return "战略配备部署完成"
 	case engine.PhasePreview:

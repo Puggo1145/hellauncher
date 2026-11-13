@@ -21,17 +21,23 @@ func TestHUDViewRendersAllPhasesCleanly(t *testing.T) {
 
 	tt := ui.NewTester(func(c *ui.Context) {
 		hud.View(c, snap)
-	}, 440, 560)
+	}, 460, 580)
 	// Simulate inactive ShowInactive() panel!
 	tt.SetWindowActive(false)
 	tt.Frame()
 
-	if !tt.HasText("STRATAGEMS // 战略配备") {
-		t.Fatalf("expected header in PhaseOpen, texts=%v", tt.Texts())
+	if !tt.HasText("战略配备") || !tt.HasText("STRATAGEMS") || !tt.HasText("指令序列:") {
+		t.Fatalf("expected tactical visor header & input footer in PhaseOpen, texts=%v", tt.Texts())
 	}
 	if !tt.HasText("Google Chrome") || !tt.HasText("Zed Editor") {
 		t.Fatalf("expected default stratagems in HUD, texts=%v", tt.Texts())
 	}
+
+	// Verify flat mode toggle works cleanly without stale state
+	snap.Loadout.Settings.VisorCurved = false
+	tt.Frame()
+	snap.Loadout.Settings.VisorCurved = true
+	tt.Frame()
 
 	// Prefix filtering & step count
 	snap.Typed = []catalog.Dir{catalog.DirUp, catalog.DirDown}
