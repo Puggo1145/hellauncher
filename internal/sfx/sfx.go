@@ -1,8 +1,10 @@
 package sfx
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"slices"
@@ -74,14 +76,14 @@ type AudioSpeaker struct {
 	stopCh    chan struct{}
 }
 
-// NewAudioSpeaker decodes all embedded OGG cues plus wrist-terminal open/close
-// telemetry chimes into PCM memory and starts zero-volume hardware keep-warm.
+// NewAudioSpeaker decodes all embedded Helldivers 2 OGG cues into PCM memory
+// and starts zero-volume hardware keep-warm.
 func NewAudioSpeaker() *AudioSpeaker {
 	audio.SetLatency(audio.LatencyInteractive)
 
 	s := &AudioSpeaker{
-		openSnd:  synthWristOpenSound(),
-		closeSnd: synthWristCloseSound(),
+		openSnd:  decodeTrimmedSound("sounds/stratagem-menu-open.ogg"),
+		closeSnd: decodeTrimmedSound("sounds/stratagem-menu-close.ogg"),
 		keepWarm: audio.NewSound(48000, 1, make([]float32, 64)),
 		stopCh:   make(chan struct{}),
 	}
@@ -112,6 +114,66 @@ func decodeEmbeddedSound(path string) *audio.Sound {
 	return snd
 }
 
+// decodeTrimmedSound decodes an embedded OGG asset and strips leading digital
+// silence (<0.002 amplitude, preserving a 1ms pre-transient guard) so wrist-pad
+// open/close game assets fire with immediate sub-millisecond attack latency.
+func decodeTrimmedSound(path string) *audio.Sound {
+	data, err := soundsFS.ReadFile(path)
+	if err != nil {
+		slog.Warn("sfx read embedded sound failed", "path", path, "err", err)
+		return nil
+	}
+	dec, _, err := audio.NewDecoder(bytes.NewReader(data))
+	if err != nil {
+		slog.Warn("sfx decode sound failed", "path", path, "err", err)
+		return nil
+	}
+	sr := dec.SampleRate()
+	ch := dec.Channels()
+	if ch < 1 || sr <= 0 {
+		return nil
+	}
+	keep := min(ch, 2)
+	var samples []float32
+	buf := make([]float32, 4096/ch*ch)
+	for {
+		n, rErr := dec.Read(buf)
+		n -= n % ch
+		for i := 0; i < n; i += ch {
+			samples = append(samples, buf[i:i+keep]...)
+		}
+		if rErr == io.EOF {
+			break
+		}
+		if rErr != nil || n == 0 {
+			slog.Warn("sfx read decoded pcm failed", "path", path, "err", rErr)
+			return nil
+		}
+	}
+	frames := len(samples) / keep
+	if frames == 0 {
+		return nil
+	}
+	guardFrames := max(sr/1000, 1)
+	startFrame := 0
+	for i := 0; i < frames; i++ {
+		var peak float64
+		for c := 0; c < keep; c++ {
+			v := math.Abs(float64(samples[i*keep+c]))
+			if v > peak {
+				peak = v
+			}
+		}
+		if peak >= 0.002 {
+			if i > guardFrames {
+				startFrame = i - guardFrames
+			}
+			break
+		}
+	}
+	return audio.NewSound(sr, keep, samples[startFrame*keep:])
+}
+
 func (s *AudioSpeaker) pulseWarm() {
 	if s.muted.Load() || s.closed.Load() || s.keepWarm == nil {
 		return
@@ -139,11 +201,13 @@ func (s *AudioSpeaker) Play(cue Cue) {
 	switch {
 	case cue == CueOpen:
 		if s.openSnd != nil {
-			s.openSnd.NewPlayer().SetVolume(0.76).Play()
+			// Normalize raw Wwise -20 dBFS export (peak 0.099) to match input beep peak (~0.24).
+			s.openSnd.NewPlayer().SetVolume(2.45).Play()
 		}
 	case cue == CueClose:
 		if s.closeSnd != nil {
-			s.closeSnd.NewPlayer().SetVolume(0.72).Play()
+			// Normalize raw Wwise -25 dBFS export (peak 0.057) to balanced stow peak (~0.20).
+			s.closeSnd.NewPlayer().SetVolume(3.50).Play()
 		}
 	case cue >= CueStep1 && cue <= CueStep8:
 		idx := int(cue - CueStep1)
@@ -229,132 +293,4 @@ func (r *RecordSpeaker) Reset() {
 	r.mu.Lock()
 	r.cues = nil
 	r.mu.Unlock()
-}
-
-// synthWristOpenSound generates a 48kHz stereo tactical wrist-pad activation
-// chime (tactile micro-switch detent + ascending two-note crystal telemetry
-// lock matched to the 2.6kHz harmonic profile of stratagem-input-beep-*.ogg).
-func synthWristOpenSound() *audio.Sound {
-	const (
-		sr     = 48000
-		durSec = 0.098
-		frames = int(sr * durSec)
-	)
-	pcm := make([]float32, frames*2)
-	var p1, p2 float64
-	for i := 0; i < frames; i++ {
-		t := float64(i) / sr
-		var sample float64
-
-		// Crisp tactile wrist-latch click transient (0..7ms)
-		if t < 0.007 {
-			env := math.Exp(-t / 0.0016)
-			sample += 0.14 * env * (math.Sin(2*math.Pi*2150*t) + 0.5*math.Sin(2*math.Pi*3400*t))
-		}
-
-		// Note 1 (3..44ms): 880 Hz telemetry wake tone
-		if t >= 0.003 && t < 0.048 {
-			lt := t - 0.003
-			att := smoothAttack(lt, 0.0025)
-			dec := math.Exp(-lt / 0.020)
-			p1 += 2 * math.Pi * 880.0 / sr
-			tone := 0.66*math.Sin(p1) + 0.24*math.Sin(2*p1) + 0.10*math.Sin(3*p1)
-			sample += 0.22 * att * dec * tone
-		}
-
-		// Note 2 (36..98ms): ascending 1320 Hz ready-for-code harmonic lock
-		if t >= 0.036 {
-			lt := t - 0.036
-			freq := 1320.0 - 40.0*math.Exp(-lt/0.006)
-			att := smoothAttack(lt, 0.0025)
-			dec := math.Exp(-lt / 0.023)
-			fadeOut := smoothTail(t, durSec, 0.008)
-			p2 += 2 * math.Pi * freq / sr
-			tone := 0.62*math.Sin(p2) + 0.27*math.Sin(2*p2) + 0.11*math.Sin(3*p2)
-			sample += 0.26 * att * dec * fadeOut * tone
-		}
-
-		writeStereo(pcm, i, sample)
-	}
-	return audio.NewSound(sr, 2, pcm)
-}
-
-// synthWristCloseSound generates the inverse 48kHz stereo tactical wrist-pad
-// power-down / stow chime (1175 Hz -> 740->600 Hz descending lock-off).
-func synthWristCloseSound() *audio.Sound {
-	const (
-		sr     = 48000
-		durSec = 0.088
-		frames = int(sr * durSec)
-	)
-	pcm := make([]float32, frames*2)
-	var p1, p2 float64
-	for i := 0; i < frames; i++ {
-		t := float64(i) / sr
-		var sample float64
-
-		// Note 1 (0..40ms): high-mid release chime
-		if t < 0.042 {
-			att := smoothAttack(t, 0.0022)
-			dec := math.Exp(-t / 0.017)
-			p1 += 2 * math.Pi * 1175.0 / sr
-			tone := 0.68*math.Sin(p1) + 0.24*math.Sin(2*p1) + 0.08*math.Sin(3*p1)
-			sample += 0.21 * att * dec * tone
-		}
-
-		// Subtle latch release detent + descending power-down (30..88ms)
-		if t >= 0.030 {
-			lt := t - 0.030
-			if lt < 0.006 {
-				sample += 0.08 * math.Exp(-lt/0.0015) * math.Sin(2*math.Pi*1650*lt)
-			}
-			freq := 610.0 + 170.0*math.Exp(-lt/0.024)
-			att := smoothAttack(lt, 0.0025)
-			dec := math.Exp(-lt / 0.021)
-			fadeOut := smoothTail(t, durSec, 0.008)
-			p2 += 2 * math.Pi * freq / sr
-			tone := 0.74*math.Sin(p2) + 0.20*math.Sin(2*p2) + 0.06*math.Sin(3*p2)
-			sample += 0.23 * att * dec * fadeOut * tone
-		}
-
-		writeStereo(pcm, i, sample)
-	}
-	return audio.NewSound(sr, 2, pcm)
-}
-
-func smoothAttack(t, rise float64) float64 {
-	if t <= 0 {
-		return 0
-	}
-	if t >= rise {
-		return 1
-	}
-	return 0.5 - 0.5*math.Cos(math.Pi*(t/rise))
-}
-
-func smoothTail(t, total, tail float64) float64 {
-	rem := total - t
-	if rem <= 0 {
-		return 0
-	}
-	if rem >= tail {
-		return 1
-	}
-	return 0.5 - 0.5*math.Cos(math.Pi*(rem/tail))
-}
-
-func writeStereo(pcm []float32, frame int, v float64) {
-	if v > 0.95 {
-		v = 0.95
-	} else if v < -0.95 {
-		v = -0.95
-	}
-	// Slight 8-sample Haas stereo offset adds subtle helmet-visor spatial width
-	pcm[frame*2] = float32(v)
-	rIdx := frame + 8
-	if rIdx*2+1 < len(pcm) {
-		pcm[rIdx*2+1] = float32(v * 0.96)
-	} else {
-		pcm[frame*2+1] = float32(v * 0.96)
-	}
 }
