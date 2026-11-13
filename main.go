@@ -102,8 +102,34 @@ func main() {
 		if isE2E {
 			spk = sfx.NewRecordSpeaker()
 			rig := sys.NewFakeRig()
+			if os.Getenv("HELLDRIVER_E2E_DEPLOY") == "1" {
+				rig.ExecFn = func(ctx context.Context, _ catalog.Step, _ *sys.Point) error {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-time.After(1400 * time.Millisecond):
+						return nil
+					}
+				}
+			}
 			eng = engine.New(rig, spk, cat.Snapshot())
 			stopInput = rig.StartInput(eng.HandleInput, eng.SetTrusted)
+			if os.Getenv("HELLDRIVER_E2E_DEPLOY") == "1" {
+				go func() {
+					time.Sleep(750 * time.Millisecond)
+					t0 := time.Now()
+					rig.Emit(sys.InputEvent{At: t0, Kind: sys.InputModifiers, Mods: sys.Mods{LeftCtrl: true}})
+					rig.Emit(sys.InputEvent{At: t0.Add(60 * time.Millisecond), Kind: sys.InputModifiers, Mods: sys.Mods{}})
+					rig.Emit(sys.InputEvent{At: t0.Add(120 * time.Millisecond), Kind: sys.InputModifiers, Mods: sys.Mods{LeftCtrl: true}})
+					rig.Emit(sys.InputEvent{At: t0.Add(150 * time.Millisecond), Kind: sys.InputKeyDown, KeyCode: 13, Role: sys.KeyDirUp})
+					rig.Emit(sys.InputEvent{At: t0.Add(160 * time.Millisecond), Kind: sys.InputKeyUp, KeyCode: 13})
+					rig.Emit(sys.InputEvent{At: t0.Add(180 * time.Millisecond), Kind: sys.InputKeyDown, KeyCode: 1, Role: sys.KeyDirDown})
+					rig.Emit(sys.InputEvent{At: t0.Add(190 * time.Millisecond), Kind: sys.InputKeyUp, KeyCode: 1})
+					rig.Emit(sys.InputEvent{At: t0.Add(210 * time.Millisecond), Kind: sys.InputKeyDown, KeyCode: 13, Role: sys.KeyDirUp})
+					rig.Emit(sys.InputEvent{At: t0.Add(220 * time.Millisecond), Kind: sys.InputKeyUp, KeyCode: 13})
+					rig.Emit(sys.InputEvent{At: t0.Add(240 * time.Millisecond), Kind: sys.InputModifiers, Mods: sys.Mods{}})
+				}()
+			}
 		} else {
 			spk = sfx.NewAudioSpeaker()
 			rig := sys.NewPlatformRig()

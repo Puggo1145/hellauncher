@@ -82,6 +82,7 @@ async function main() {
       MYGO_ENV: "development",
       MYGO_AUTOMATION: sockPath,
       HELLDRIVER_E2E: "1",
+      HELLDRIVER_E2E_DEPLOY: process.env.HELLDRIVER_E2E_SCREENSHOT_DIR ? "1" : "0",
       HELLDRIVER_NO_AUTO_GUIDE: "1",
       HELLDRIVER_OPEN_ARSENAL: "1",
       HELLDRIVER_DATA_DIR: dataDir,
@@ -132,7 +133,15 @@ async function main() {
       const arsCap = await client.call("capture", { window: arsenalWin.id });
       fs.writeFileSync(path.join(screenshotOut, "hud-live.png"), Buffer.from(hudCap.png, "base64"));
       fs.writeFileSync(path.join(screenshotOut, "arsenal-live.png"), Buffer.from(arsCap.png, "base64"));
-      console.log(`  Saved live GPU window captures to ${screenshotOut}`);
+
+      // Wait for simulated stratagem sequence -> PhaseDeploying, then sample 3 live animation frames
+      await new Promise((r) => setTimeout(r, 950));
+      for (let i = 1; i <= 3; i++) {
+        const depCap = await client.call("capture", { window: hudWin.id });
+        fs.writeFileSync(path.join(screenshotOut, `hud-deploying-${i}.png`), Buffer.from(depCap.png, "base64"));
+        if (i < 3) await new Promise((r) => setTimeout(r, 230));
+      }
+      console.log(`  Saved live GPU window & deploying animation captures to ${screenshotOut}`);
     }
 
     sock.destroy();

@@ -13,6 +13,7 @@ func TestAudioSpeakerLifecycleAndCues(t *testing.T) {
 
 	spk.SetMuted(true)
 	spk.Play(sfx.CueOpen)
+	spk.Play(sfx.CueClose)
 	spk.Play(sfx.StepCue(1))
 	spk.Play(sfx.CueFail)
 	spk.Play(sfx.CueArmed)
@@ -21,6 +22,8 @@ func TestAudioSpeakerLifecycleAndCues(t *testing.T) {
 	spk.Close()
 	// Calls after Close must be safe no-ops.
 	spk.SetMuted(false)
+	spk.Play(sfx.CueOpen)
+	spk.Play(sfx.CueClose)
 	spk.Play(sfx.StepCue(3))
 }
 
@@ -29,6 +32,7 @@ func TestRecordSpeakerRespectsMuteAndClose(t *testing.T) {
 	rec.Play(sfx.CueOpen)
 	rec.Play(sfx.StepCue(1))
 	rec.Play(sfx.StepCue(2))
+	rec.Play(sfx.CueClose)
 
 	rec.SetMuted(true)
 	rec.Play(sfx.CueFail)
@@ -38,7 +42,7 @@ func TestRecordSpeakerRespectsMuteAndClose(t *testing.T) {
 	rec.Close()
 	rec.Play(sfx.StepCue(8))
 
-	want := []sfx.Cue{sfx.CueOpen, sfx.CueStep1, sfx.CueStep2, sfx.CueReady}
+	want := []sfx.Cue{sfx.CueOpen, sfx.CueStep1, sfx.CueStep2, sfx.CueClose, sfx.CueReady}
 	if !slices.Equal(rec.Cues(), want) {
 		t.Fatalf("got cues %v, want %v", rec.Cues(), want)
 	}

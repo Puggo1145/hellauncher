@@ -380,6 +380,7 @@ func (e *Engine) handleModifiers(now time.Time, mods sys.Mods) {
 		e.spk.Play(sfx.CueOpen)
 		e.publish(snap)
 	} else if closed {
+		e.spk.Play(sfx.CueClose)
 		e.publish(snap)
 	}
 }
@@ -414,6 +415,7 @@ func (e *Engine) handleKeyDown(ev sys.InputEvent) bool {
 			e.mu.Unlock()
 
 			e.rig.SetMouseCapture(false)
+			e.spk.Play(sfx.CueClose)
 			e.publish(snap)
 			return true
 		}
@@ -545,6 +547,7 @@ func (e *Engine) handleKeyDown(ev sys.InputEvent) bool {
 		snap = e.snapshotLocked()
 		e.mu.Unlock()
 
+		e.spk.Play(sfx.CueClose)
 		e.publish(snap)
 		return true
 	}
@@ -555,6 +558,7 @@ func (e *Engine) handleKeyDown(ev sys.InputEvent) bool {
 		e.closeOpenSessionLocked()
 		snap = e.snapshotLocked()
 		e.mu.Unlock()
+		e.spk.Play(sfx.CueClose)
 		e.publish(snap)
 		return false
 	}
@@ -630,6 +634,7 @@ func (e *Engine) handleMouseRightDown() bool {
 	e.mu.Unlock()
 
 	e.rig.SetMouseCapture(false)
+	e.spk.Play(sfx.CueClose)
 	e.publish(snap)
 	return true
 }

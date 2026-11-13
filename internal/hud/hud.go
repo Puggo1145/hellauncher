@@ -63,17 +63,18 @@ func LayerEffect(pos vec2) vec4 {
 	nx := pos.x / sz.x
 	ny := pos.y / sz.y
 
-	// Optical center of the helmet visor sits to the right of the upper-left HUD
+	// Optical center of the helmet visor sits to the right of the upper-left HUD.
+	// Kept subtle so curvature feels natural like V1 without over-tilting text.
 	vx := 1.08 - nx
 	vy := 0.52 - ny
 	r2 := vx*vx + vy*vy
 
-	offX := (r2 - 0.85) * vx * 11.5
-	offY := (r2 - 0.45) * vy * 14.5
+	offX := (r2 - 0.85) * vx * 3.6
+	offY := (r2 - 0.45) * vy * 4.2
 	src := vec2(pos.x-offX, pos.y-offY)
 
 	// Subtle peripheral polycarbonate visor chromatic dispersion near outer rim
-	disp := vx * vx * 0.36
+	disp := vx * vx * 0.18
 	cR := layerSample(src + vec2(disp, 0))
 	cG := layerSample(src)
 	cB := layerSample(src - vec2(disp, 0))
@@ -318,17 +319,17 @@ func View(c *ui.Context, snap engine.Snapshot) {
 		if snap.Loadout.Settings.VisorCurved {
 			// NOTE: In mygo/ui, transforms chain post-multiply (Then):
 			// RotateY / RotateX MUST precede Perspective(dist) so perspective
-			// projects the rotated 3D plane! Plus visorShader adds true optical
-			// helmet-glass spherical curvature & scanlines on Metal / D3D11.
+			// projects the rotated 3D plane! Tuned to match V1's subtle ~4.6deg
+			// helmet-visor feel rather than an exaggerated slant.
 			hudStack.
-				TransformOrigin(0, 0.14).
-				RotateY(11.5).
-				RotateX(-1.2).
-				Perspective(580).
+				TransformOrigin(0, 0.16).
+				RotateY(4.6).
+				RotateX(-0.7).
+				Perspective(1020).
 				Translate(slideX+shakeX, 0)
 			if *gpuReady && visorShader != nil {
 				hudStack.Effect(visorShader.Effect(shader.Options{
-					MaxSampleOffset: ui.Point{X: 28, Y: 28},
+					MaxSampleOffset: ui.Point{X: 18, Y: 18},
 				}))
 			}
 		} else {
@@ -530,22 +531,23 @@ func renderStratagemStrips(c *ui.Context, t *ui.Theme, snap engine.Snapshot, err
 
 			targetOpacity := float32(1.0)
 			if dimmed {
-				targetOpacity = 0.24
+				targetOpacity = 0.28
 			}
 
 			strip := ui.Column(c.Key("strat-"+st.ID)).
-				Padding(5, 10, 6, 9).
+				Padding(5, 10, 7, 9).
 				Gap(4).
+				Clip().
 				Border(1, ui.RGBA(255, 255, 255, 0.08)).
 				Shadow(0, 4, 14, 0, ui.RGBA(0, 0, 0, 0.45))
 
 			shiftX := strip.Animate("shift", targetShift, 130*time.Millisecond)
-			rowAlpha := strip.Animate("alpha", targetOpacity, 120*time.Millisecond)
-			strip.Translate(shiftX, 0).Opacity(rowAlpha)
+			contentAlpha := strip.Animate("alpha", targetOpacity, 120*time.Millisecond)
+			strip.Translate(shiftX, 0)
 
 			switch {
 			case errFlash > 0.08:
-				strip.Background(ui.RGBA(128, 22, 22, 0.82))
+				strip.Background(ui.RGBA(128, 22, 22, 0.86))
 				paintLeftBar(strip, 3, ui.Hex("#ff3b30"))
 			case isTarget && snap.Phase == engine.PhaseDeployed:
 				strip.LinearGradient(ui.LinearGradient{
@@ -570,12 +572,14 @@ func renderStratagemStrips(c *ui.Context, t *ui.Theme, snap engine.Snapshot, err
 			case len(snap.Typed) > 0 && matchesPrefix:
 				strip.Background(ui.RGBA(28, 35, 44, 0.94))
 				paintLeftBar(strip, 3, t.Accent)
+			case dimmed:
+				strip.Background(ui.RGBA(14, 18, 23, 0.78))
 			default:
 				strip.Background(t.Surface)
 			}
 
 			strip.Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Gap(9).Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(9).Opacity(contentAlpha).Children(func() {
 					renderCategoryIconBox(c, st, isTarget)
 
 					ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
@@ -606,26 +610,37 @@ func renderStratagemStrips(c *ui.Context, t *ui.Theme, snap engine.Snapshot, err
 				})
 
 				if isTarget && snap.Phase == engine.PhaseDeploying {
-					track := ui.Row(c.Key("deploy-sweep")).Height(2.5).Background(ui.RGBA(255, 233, 0, 0.16))
-					prog := track.Loop("sweep", 700*time.Millisecond, ui.Linear)
+					track := ui.Row(c.Key("deploy-sweep")).
+						Absolute().
+						Left(0).
+						Right(0).
+						Bottom(0).
+						Height(3).
+						Clip().
+						Background(ui.RGBA(255, 233, 0, 0.18))
+					prog := track.Loop("sweep", 620*time.Millisecond, ui.Linear)
 					track.Children(func() {
 						ui.Box(c).
 							WidthPercent(46).
-							Height(2.5).
+							Height(3).
 							LinearGradient(ui.LinearGradient{
 								Angle: 90,
 								Stops: []ui.GradientStop{
 									{Color: ui.RGBA(255, 233, 0, 0.0), At: 0},
-									{Color: ui.Hex("#ffe900"), At: 0.65},
+									{Color: ui.Hex("#ffe900"), At: 0.42},
 									{Color: ui.Hex("#ffffff"), At: 1.0},
 								},
 							}).
-							Shadow(0, 0, 8, 0, ui.RGBA(255, 233, 0, 0.90)).
+							Shadow(0, 0, 8, 0, ui.RGBA(255, 233, 0, 0.92)).
 							TranslatePercent(-100+prog*320, 0)
 					})
 				} else if isTarget && snap.Phase == engine.PhaseDeployed {
 					ui.Box(c.Key("deploy-done")).
-						Height(2.5).
+						Absolute().
+						Left(0).
+						Right(0).
+						Bottom(0).
+						Height(3).
 						Background(t.Accent).
 						Shadow(0, 0, 10, 0, ui.RGBA(255, 233, 0, 0.90))
 				}

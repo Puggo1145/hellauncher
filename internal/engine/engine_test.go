@@ -161,6 +161,7 @@ func TestEngineBeaconClickMouseCaptureLifecycle(t *testing.T) {
 	now2 := summonDoubleHoldCtrl(rig, now.Add(2*time.Second))
 	rig.Emit(sys.InputEvent{At: now2.Add(20 * time.Millisecond), Kind: sys.InputKeyDown, KeyCode: 2, Role: sys.KeyDirRight})
 	rig.Emit(sys.InputEvent{At: now2.Add(40 * time.Millisecond), Kind: sys.InputKeyDown, KeyCode: 0, Role: sys.KeyDirLeft})
+	rig.Emit(sys.InputEvent{At: now2.Add(55 * time.Millisecond), Kind: sys.InputModifiers, Mods: sys.Mods{}})
 	if !rig.MouseCaptured() {
 		t.Fatal("expected mouse capture on second arming")
 	}
@@ -170,6 +171,18 @@ func TestEngineBeaconClickMouseCaptureLifecycle(t *testing.T) {
 	if rig.MouseCaptured() || eng.Snapshot().Phase != engine.PhaseIdle {
 		t.Fatalf("expected PhaseIdle and mouseCapture=false after right-click cancel, got phase=%q mouse=%v",
 			eng.Snapshot().Phase, rig.MouseCaptured())
+	}
+	cues := spk.Cues()
+	if len(cues) == 0 || cues[len(cues)-1] != sfx.CueClose {
+		t.Fatalf("expected CueClose after right-click beacon cancel, got cues=%v", cues)
+	}
+
+	// Also verify opening and releasing Ctrl without completing plays CueOpen -> CueClose:
+	spk.Reset()
+	now3 := summonDoubleHoldCtrl(rig, now2.Add(2*time.Second))
+	rig.Emit(sys.InputEvent{At: now3.Add(90 * time.Millisecond), Kind: sys.InputModifiers, Mods: sys.Mods{}})
+	if want := []sfx.Cue{sfx.CueOpen, sfx.CueClose}; !slices.Equal(spk.Cues(), want) {
+		t.Fatalf("expected open+close cues %v on Ctrl summon+release, got %v", want, spk.Cues())
 	}
 }
 
