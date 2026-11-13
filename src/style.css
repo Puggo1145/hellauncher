@@ -1,0 +1,570 @@
+/* ==========================================================================
+   HELLDRIVER // TRANSPARENT DESKTOP OVERLAY HUD (MYGO)
+   Authentic Helldivers 2 In-Mission Stratagem Panel + Helmet Visor Curvature
+   ========================================================================== */
+
+@font-face {
+  font-family: 'FS Sinclair';
+  src: url('/assets/fonts/FSSinclair-Light.otf') format('opentype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'FS Sinclair';
+  src: url('/assets/fonts/FSSinclair-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'FS Sinclair';
+  src: url('/assets/fonts/FSSinclair-Medium.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --se-yellow: #ffe900;
+  --se-gold-border: #c9b268;
+  --se-red: #ff3b30;
+  --se-red-border: #d56152;
+  --se-blue-border: #4fb3d0;
+  --se-green-border: #679452;
+
+  --hud-bg: rgba(15, 19, 24, 0.88);
+  --hud-row-bg: rgba(18, 23, 29, 0.86);
+  --hud-icon-bg: rgba(10, 13, 17, 0.95);
+  --hud-text: #f5f8fb;
+
+  --font-tactical: 'FS Sinclair', 'PingFang SC', 'Microsoft YaHei UI', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+  color: var(--hud-text);
+  font-family: var(--font-tactical);
+  pointer-events: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ==========================================================================
+   FLOATING STRATAGEM HUD CONTAINER & SLIDE TRANSITIONS
+   ========================================================================== */
+
+.stratagem-hud {
+  position: fixed;
+  top: 10px;
+  left: 12px;
+  width: 376px;
+  transform-origin: top left;
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    opacity 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, opacity;
+}
+
+.stratagem-hud.visor-curved {
+  transform: perspective(1050px) rotateY(4.5deg) rotateX(-1deg) translateX(0);
+}
+
+/* Hidden / Idle off-screen to the left */
+.stratagem-hud.phase-idle {
+  opacity: 0;
+  transform: translateX(-34px);
+  transition:
+    opacity 0.14s ease-in,
+    transform 0.16s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.stratagem-hud.visor-curved.phase-idle {
+  transform: perspective(1050px) rotateY(4.5deg) rotateX(-1deg) translateX(-34px);
+}
+
+/* Top-Left Visor Corner Bracket */
+.visor-corner-mark {
+  position: absolute;
+  top: -6px;
+  left: -8px;
+  display: flex;
+  align-items: center;
+}
+
+.visor-corner-mark .corner-l {
+  width: 8px;
+  height: 18px;
+  border-left: 1.5px solid rgba(255, 255, 255, 0.65);
+  border-top: 1.5px solid rgba(255, 255, 255, 0.65);
+  border-bottom: 1.5px solid rgba(255, 255, 255, 0.3);
+}
+
+.visor-corner-mark .corner-tick {
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-left: -3px;
+}
+
+/* Header Bar */
+.hud-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--hud-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 6px 10px;
+  border-left: 3px solid var(--se-yellow);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.stratagem-hud.phase-deploying .hud-header-bar {
+  border-left-color: var(--se-yellow);
+  background: rgba(24, 31, 39, 0.94);
+  box-shadow: 0 0 18px rgba(255, 233, 0, 0.22), 0 6px 20px rgba(0, 0, 0, 0.48);
+}
+
+.stratagem-hud.phase-executed .hud-header-bar {
+  border-left-color: #ffffff;
+  background: rgba(34, 42, 50, 0.95);
+  box-shadow: 0 0 22px rgba(255, 233, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+.hud-header-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.stratagem-emblem {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+}
+
+.hud-header-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+.hud-header-sub {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.hud-state-badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  background: rgba(255, 233, 0, 0.18);
+  border: 1px solid var(--se-yellow);
+  color: var(--se-yellow);
+}
+
+.stratagem-hud.phase-preview .hud-state-badge {
+  background: rgba(79, 179, 208, 0.22);
+  border-color: #7dd3fc;
+  color: #e0f2fe;
+}
+
+@keyframes badgeBeaconPulse {
+  0%, 100% {
+    background: rgba(255, 233, 0, 0.22);
+    box-shadow: 0 0 8px rgba(255, 233, 0, 0.25);
+  }
+  50% {
+    background: rgba(255, 233, 0, 0.42);
+    box-shadow: 0 0 14px rgba(255, 233, 0, 0.55);
+  }
+}
+
+.stratagem-hud.phase-deploying .hud-state-badge {
+  color: #fffbe0;
+  border-color: var(--se-yellow);
+  font-weight: 700;
+  animation: badgeBeaconPulse 0.85s ease-in-out infinite;
+}
+
+.stratagem-hud.phase-executed .hud-state-badge {
+  background: var(--se-yellow);
+  border-color: #ffffff;
+  color: #0b0f14;
+  font-weight: 700;
+}
+
+/* Accessibility Permission Banner */
+.permission-banner {
+  margin-top: 4px;
+  padding: 5px 9px;
+  background: rgba(145, 34, 28, 0.9);
+  border-left: 3px solid #ff6b6b;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 11.5px;
+  color: #ffe4e4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.perm-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff6b6b;
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   STRATAGEM ROW CARDS
+   ========================================================================== */
+
+.hud-stratagem-list {
+  margin-top: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.strat-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 10px 6px 6px;
+  background: var(--hud-row-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-left: 2.5px solid transparent;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.42);
+  transition:
+    opacity 0.12s ease,
+    transform 0.14s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle CRT scanline overlay */
+.strat-row::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(255, 255, 255, 0.016) 3px
+  );
+  pointer-events: none;
+}
+
+.strat-row.prefix-active {
+  background: rgba(28, 35, 44, 0.94);
+  border-left-color: var(--se-yellow);
+  transform: translateX(3px);
+}
+
+.strat-row.prefix-dimmed {
+  opacity: 0.24;
+  filter: grayscale(0.72);
+}
+
+/* Fluid Non-Blocking Deploying / Loading State */
+.strat-row.row-deploying {
+  opacity: 1 !important;
+  filter: none !important;
+  border-left: 4px solid var(--se-yellow);
+  background: linear-gradient(90deg, rgba(255, 233, 0, 0.2) 0%, rgba(25, 33, 42, 0.96) 68%);
+  box-shadow: 0 0 20px rgba(255, 233, 0, 0.24), 0 4px 16px rgba(0, 0, 0, 0.5);
+  transform: translateX(5px);
+}
+
+.strat-row.row-deploying .strat-icon-box,
+.strat-row.row-executed .strat-icon-box {
+  border-color: var(--se-yellow);
+  box-shadow: 0 0 10px rgba(255, 233, 0, 0.35);
+}
+
+.strat-row.row-executed {
+  opacity: 1 !important;
+  filter: none !important;
+  border-left: 4px solid #ffffff;
+  background: linear-gradient(90deg, rgba(255, 233, 0, 0.32) 0%, rgba(28, 36, 46, 0.96) 68%);
+  box-shadow: 0 0 24px rgba(255, 233, 0, 0.38), 0 4px 16px rgba(0, 0, 0, 0.5);
+  transform: translateX(5px);
+}
+
+/* Tactical Deploying Spinner & Sweeping Progress Bar (60fps GPU-composited) */
+.deploy-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--se-yellow);
+  font-weight: 700;
+}
+
+.deploy-spinner {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.6px solid rgba(255, 233, 0, 0.28);
+  border-top-color: #ffffff;
+  border-right-color: var(--se-yellow);
+  animation: tacticalSpin 0.58s linear infinite;
+  will-change: transform;
+  flex-shrink: 0;
+}
+
+@keyframes tacticalSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.deploy-progress-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.5px;
+  background: rgba(255, 233, 0, 0.16);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.deploy-progress-bar {
+  width: 46%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 233, 0, 0) 0%,
+    var(--se-yellow) 65%,
+    #ffffff 100%
+  );
+  box-shadow: 0 0 8px rgba(255, 233, 0, 0.9);
+  animation: deploySweep 0.72s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+  will-change: transform;
+}
+
+@keyframes deploySweep {
+  0% {
+    transform: translateX(-105%);
+  }
+  100% {
+    transform: translateX(225%);
+  }
+}
+
+.deploy-progress-track.deploy-progress-done {
+  background: var(--se-yellow);
+  box-shadow: 0 0 10px rgba(255, 233, 0, 0.9);
+}
+
+/* Wrong Key Red Flash & Shake */
+@keyframes errorShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(7px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(4px); }
+}
+
+.stratagem-hud.input-error .hud-stratagem-list,
+.stratagem-hud.input-error .hud-input-footer {
+  animation: errorShake 0.26s ease-out;
+}
+
+.stratagem-hud.input-error .strat-row {
+  background: rgba(128, 22, 22, 0.78) !important;
+  border-left-color: var(--se-red) !important;
+}
+
+/* Square Icon Box */
+.strat-icon-box {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  padding: 4px;
+  background: var(--hud-icon-bg);
+  border: 2.5px solid var(--se-gold-border);
+  flex-shrink: 0;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.strat-icon-box.cat-blue { border-color: var(--se-blue-border); }
+.strat-icon-box.cat-red { border-color: var(--se-red-border); }
+.strat-icon-box.cat-yellow { border-color: var(--se-gold-border); }
+.strat-icon-box.cat-green { border-color: var(--se-green-border); }
+
+.strat-icon-box svg,
+.strat-icon-box img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Right Info Column */
+.strat-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.strat-title-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.strat-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+}
+
+.strat-subtitle {
+  font-size: 10.5px;
+  color: rgba(235, 242, 248, 0.56);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.strat-row.row-executed .strat-subtitle {
+  color: var(--se-yellow);
+  font-weight: 700;
+}
+
+/* Chunky Helldivers 2 Polygon Block Arrows */
+.strat-arrows-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+}
+
+.hd2-arrow-svg {
+  width: 15px;
+  height: 15px;
+  fill: rgba(255, 255, 255, 0.42);
+  filter: drop-shadow(1px 2px 1px rgba(0, 0, 0, 0.88));
+  transition: fill 0.06s ease, filter 0.08s ease;
+}
+
+.hd2-arrow-svg.matched {
+  fill: var(--se-yellow);
+  filter: drop-shadow(0 0 6px rgba(255, 233, 0, 0.92)) drop-shadow(1px 2px 1px rgba(0, 0, 0, 0.9));
+}
+
+.hd2-arrow-svg.just-matched {
+  fill: #ffffff;
+  animation: arrowPop 0.16s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes arrowPop {
+  0% {
+    fill: #ffffff;
+    scale: 1.38;
+  }
+  100% {
+    fill: var(--se-yellow);
+    scale: 1;
+  }
+}
+
+/* ==========================================================================
+   BOTTOM LIVE INPUT FOOTER
+   ========================================================================== */
+
+.hud-input-footer {
+  margin-top: 5px;
+  padding: 5px 10px;
+  background: rgba(12, 16, 20, 0.9);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-left: 3px solid rgba(255, 233, 0, 0.65);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.42);
+}
+
+.live-input-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+}
+
+.track-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 0.05em;
+}
+
+.live-typed-arrows {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.live-typed-placeholder {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.36);
+  letter-spacing: 0.06em;
+}
+
+.hud-footer-hint {
+  font-size: 10.5px;
+  color: rgba(255, 233, 0, 0.78);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
