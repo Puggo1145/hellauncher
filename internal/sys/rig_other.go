@@ -5,7 +5,7 @@ package sys
 import (
 	"context"
 
-	"helldriver/internal/catalog"
+	"hellauncher/internal/catalog"
 )
 
 func CheckTrusted() bool { return true }

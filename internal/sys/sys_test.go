@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"helldriver/internal/catalog"
-	"helldriver/internal/sys"
+	"hellauncher/internal/catalog"
+	"hellauncher/internal/sys"
 )
 
 func TestFakeRigGatesMouseClicksUntilMouseCaptureEnabled(t *testing.T) {

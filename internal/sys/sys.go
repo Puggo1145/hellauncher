@@ -9,7 +9,7 @@ import (
 
 	"github.com/egoist/mygo"
 
-	"helldriver/internal/catalog"
+	"hellauncher/internal/catalog"
 )
 
 // Point represents global desktop screen coordinates in logical pixels (DIPs).

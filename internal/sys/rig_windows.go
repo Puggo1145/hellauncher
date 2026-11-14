@@ -17,7 +17,7 @@ import (
 	"time"
 	"unsafe"
 
-	"helldriver/internal/catalog"
+	"hellauncher/internal/catalog"
 )
 
 const (

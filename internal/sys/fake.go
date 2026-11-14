@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"helldriver/internal/catalog"
+	"hellauncher/internal/catalog"
 )
 
 // ExecutedCall records one Execute invocation observed by FakeRig.

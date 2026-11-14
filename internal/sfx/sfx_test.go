@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"helldriver/internal/sfx"
+	"hellauncher/internal/sfx"
 )
 
 func TestAudioSpeakerLifecycleAndCues(t *testing.T) {

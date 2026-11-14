@@ -6,8 +6,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"helldriver/internal/arsenal"
-	"helldriver/internal/catalog"
+	"hellauncher/internal/arsenal"
+	"hellauncher/internal/catalog"
 )
 
 func TestArsenalCreateRecordConflictAndSaveFlow(t *testing.T) {

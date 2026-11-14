@@ -1,4 +1,4 @@
-module helldriver
+module hellauncher
 
 go 1.27.3
 

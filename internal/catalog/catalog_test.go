@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"helldriver/internal/catalog"
+	"hellauncher/internal/catalog"
 )
 
 func TestOpenSeedsDefaultsAndPersistsAtomically(t *testing.T) {

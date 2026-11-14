@@ -10,7 +10,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"helldriver/internal/catalog"
+	"hellauncher/internal/catalog"
 )
 
 // AppOption describes an installed desktop application selectable in the Arsenal editor.
@@ -119,7 +119,7 @@ func (m *Manager) Open() {
 	m.reloadSnapshot(m.cat.Snapshot(), true)
 
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title:     "HellDriver 军械库 // SUPER EARTH ARSENAL",
+		Title:     "HelLauncher 军械库 // SUPER EARTH ARSENAL",
 		Width:     960,
 		Height:    700,
 		MinWidth:  840,

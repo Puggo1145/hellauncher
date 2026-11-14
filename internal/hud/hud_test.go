@@ -7,9 +7,9 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"helldriver/internal/catalog"
-	"helldriver/internal/engine"
-	"helldriver/internal/hud"
+	"hellauncher/internal/catalog"
+	"hellauncher/internal/engine"
+	"hellauncher/internal/hud"
 )
 
 func TestHUDViewRendersAllPhasesCleanly(t *testing.T) {

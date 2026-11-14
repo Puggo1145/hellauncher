@@ -7,8 +7,8 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/shader"
 
-	"helldriver/internal/catalog"
-	"helldriver/internal/engine"
+	"hellauncher/internal/catalog"
+	"hellauncher/internal/engine"
 )
 
 func TestVisorLensShaderRendersWithoutArtifacts(t *testing.T) {

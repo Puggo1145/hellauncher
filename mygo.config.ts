@@ -1,8 +1,8 @@
 import { defineConfig } from "mygo-cli";
 
 export default defineConfig({
-  name: "HellDriver",
-  identifier: "com.superearth.helldriver",
+  name: "HelLauncher",
+  identifier: "com.superearth.hellauncher",
   version: "0.2.0",
   out: "build",
   macos: {

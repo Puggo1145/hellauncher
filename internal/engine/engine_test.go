@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"helldriver/internal/catalog"
-	"helldriver/internal/engine"
-	"helldriver/internal/sfx"
-	"helldriver/internal/sys"
+	"hellauncher/internal/catalog"
+	"hellauncher/internal/engine"
+	"hellauncher/internal/sfx"
+	"hellauncher/internal/sys"
 )
 
 func waitForCondition(t *testing.T, desc string, cond func() bool) {

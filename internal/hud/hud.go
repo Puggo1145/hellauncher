@@ -16,8 +16,8 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/shader"
 
-	"helldriver/internal/catalog"
-	"helldriver/internal/engine"
+	"hellauncher/internal/catalog"
+	"hellauncher/internal/engine"
 )
 
 //go:embed assets/fonts/*.otf assets/icons/*
@@ -208,7 +208,7 @@ func NewOverlay() *Overlay {
 	}
 
 	o.win = mygo.NewWindow(mygo.WindowOptions{
-		Title:         "HellDriver Tactical HUD",
+		Title:         "HelLauncher Tactical HUD",
 		X:             initX,
 		Y:             initY,
 		Width:         overlayWidth,

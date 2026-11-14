@@ -6,10 +6,10 @@ import os from "node:os";
 import path from "node:path";
 
 const root = process.cwd();
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "helldriver-e2e-"));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hellauncher-e2e-"));
 const sockPath = path.join(tmpDir, "auto.sock");
 const dataDir = path.join(tmpDir, "data");
-const binPath = path.join(tmpDir, process.platform === "win32" ? "helldriver-e2e.exe" : "helldriver-e2e");
+const binPath = path.join(tmpDir, process.platform === "win32" ? "hellauncher-e2e.exe" : "hellauncher-e2e");
 
 function cleanup() {
   try {
@@ -74,18 +74,18 @@ async function main() {
     stdio: "inherit",
   });
 
-  console.log("▶ Launching HellDriver with MYGO_AUTOMATION...");
+  console.log("▶ Launching HelLauncher with MYGO_AUTOMATION...");
   const child = spawn(binPath, [], {
     cwd: root,
     env: {
       ...process.env,
       MYGO_ENV: "development",
       MYGO_AUTOMATION: sockPath,
-      HELLDRIVER_E2E: "1",
-      HELLDRIVER_E2E_DEPLOY: process.env.HELLDRIVER_E2E_SCREENSHOT_DIR ? "1" : "0",
-      HELLDRIVER_NO_AUTO_GUIDE: "1",
-      HELLDRIVER_OPEN_ARSENAL: "1",
-      HELLDRIVER_DATA_DIR: dataDir,
+      HELLAUNCHER_E2E: "1",
+      HELLAUNCHER_E2E_DEPLOY: process.env.HELLAUNCHER_E2E_SCREENSHOT_DIR ? "1" : "0",
+      HELLAUNCHER_NO_AUTO_GUIDE: "1",
+      HELLAUNCHER_OPEN_ARSENAL: "1",
+      HELLAUNCHER_DATA_DIR: dataDir,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -126,7 +126,7 @@ async function main() {
       throw new Error("Arsenal native UI tree missing expected configurator elements");
     }
 
-    const screenshotOut = process.env.HELLDRIVER_E2E_SCREENSHOT_DIR;
+    const screenshotOut = process.env.HELLAUNCHER_E2E_SCREENSHOT_DIR;
     if (screenshotOut) {
       fs.mkdirSync(screenshotOut, { recursive: true });
       const hudCap = await client.call("capture", { window: hudWin.id });

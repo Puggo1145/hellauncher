@@ -15,22 +15,22 @@ import (
 	"github.com/egoist/mygo"
 	_ "github.com/egoist/mygo/plugins/automation"
 
-	"helldriver/internal/arsenal"
-	"helldriver/internal/catalog"
-	"helldriver/internal/engine"
-	"helldriver/internal/hud"
-	"helldriver/internal/sfx"
-	"helldriver/internal/sys"
-	"helldriver/internal/trayicon"
+	"hellauncher/internal/arsenal"
+	"hellauncher/internal/catalog"
+	"hellauncher/internal/engine"
+	"hellauncher/internal/hud"
+	"hellauncher/internal/sfx"
+	"hellauncher/internal/sys"
+	"hellauncher/internal/trayicon"
 )
 
 const (
-	prodBundleID = "com.superearth.helldriver"
+	prodBundleID = "com.superearth.hellauncher"
 	maxLogBytes  = 2 << 20 // 2 MiB rotating log cap
 )
 
 func main() {
-	isE2E := os.Getenv("HELLDRIVER_E2E") == "1"
+	isE2E := os.Getenv("HELLAUNCHER_E2E") == "1"
 	isDev := os.Getenv("MYGO_ENV") == "development"
 
 	if !isE2E && !mygo.App.RequestSingleInstanceLock() {
@@ -86,10 +86,10 @@ func main() {
 	mygo.App.WhenReady(func() {
 		logDir := setupLogger(isDev)
 		dataDir := resolveDataDir(isDev)
-		slog.Info("helldriver starting", "dev", isDev, "os", runtime.GOOS, "dataDir", dataDir, "logDir", logDir)
+		slog.Info("hellauncher starting", "dev", isDev, "os", runtime.GOOS, "dataDir", dataDir, "logDir", logDir)
 
 		if isDev && sys.HasConflictingBundleRunning(prodBundleID) {
-			slog.Warn("detected production HellDriver bundle running alongside dev session; quit prod to avoid duplicate Ctrl hooks")
+			slog.Warn("detected production HelLauncher bundle running alongside dev session; quit prod to avoid duplicate Ctrl hooks")
 		}
 
 		cat, err := catalog.Open(dataDir)
@@ -102,7 +102,7 @@ func main() {
 		if isE2E {
 			spk = sfx.NewRecordSpeaker()
 			rig := sys.NewFakeRig()
-			if os.Getenv("HELLDRIVER_E2E_DEPLOY") == "1" {
+			if os.Getenv("HELLAUNCHER_E2E_DEPLOY") == "1" {
 				rig.ExecFn = func(ctx context.Context, _ catalog.Step, _ *sys.Point) error {
 					select {
 					case <-ctx.Done():
@@ -114,7 +114,7 @@ func main() {
 			}
 			eng = engine.New(rig, spk, cat.Snapshot())
 			stopInput = rig.StartInput(eng.HandleInput, eng.SetTrusted)
-			if os.Getenv("HELLDRIVER_E2E_DEPLOY") == "1" {
+			if os.Getenv("HELLAUNCHER_E2E_DEPLOY") == "1" {
 				go func() {
 					time.Sleep(750 * time.Millisecond)
 					t0 := time.Now()
@@ -155,11 +155,11 @@ func main() {
 		overlay.Apply(eng.Snapshot())
 		eng.Preview(2400 * time.Millisecond)
 
-		if os.Getenv("HELLDRIVER_OPEN_ARSENAL") == "1" {
+		if os.Getenv("HELLAUNCHER_OPEN_ARSENAL") == "1" {
 			arsenalMgr.Open()
 		}
 
-		if runtime.GOOS == "darwin" && !isE2E && !sys.CheckTrusted() && os.Getenv("HELLDRIVER_NO_AUTO_GUIDE") != "1" {
+		if runtime.GOOS == "darwin" && !isE2E && !sys.CheckTrusted() && os.Getenv("HELLAUNCHER_NO_AUTO_GUIDE") != "1" {
 			openPermissionGuide(eng)
 		}
 	})
@@ -171,12 +171,12 @@ func main() {
 }
 
 func resolveDataDir(isDev bool) string {
-	if custom := os.Getenv("HELLDRIVER_DATA_DIR"); custom != "" {
+	if custom := os.Getenv("HELLAUNCHER_DATA_DIR"); custom != "" {
 		return custom
 	}
 	base, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil || base == "" {
-		base = filepath.Join(os.TempDir(), "helldriver-data")
+		base = filepath.Join(os.TempDir(), "hellauncher-data")
 	}
 	if isDev {
 		return filepath.Join(base, "dev")
@@ -187,10 +187,10 @@ func resolveDataDir(isDev bool) string {
 func setupLogger(isDev bool) string {
 	logDir, err := mygo.App.Path(mygo.PathLogs)
 	if err != nil || logDir == "" {
-		logDir = filepath.Join(os.TempDir(), "helldriver-logs")
+		logDir = filepath.Join(os.TempDir(), "hellauncher-logs")
 	}
 	_ = os.MkdirAll(logDir, 0o755)
-	logPath := filepath.Join(logDir, "helldriver.log")
+	logPath := filepath.Join(logDir, "hellauncher.log")
 
 	if info, err := os.Stat(logPath); err == nil && info.Size() > maxLogBytes {
 		_ = os.Rename(logPath, logPath+".1")
@@ -351,17 +351,17 @@ func setupTray(
 
 	items = append(items,
 		mygo.Separator(),
-		&mygo.MenuItem{Label: "退出 HellDriver", Role: mygo.RoleQuit},
+		&mygo.MenuItem{Label: "退出 HelLauncher", Role: mygo.RoleQuit},
 	)
 
 	menu := mygo.NewMenu(items)
 	iconBytes, isTemplate := trayicon.Icon()
-	tooltip := "HellDriver — 战略配备桌面快捷指令"
+	tooltip := "HelLauncher — 战略配备桌面快捷指令"
 	if isDev {
 		tooltip = "[DEV] " + tooltip
 	}
 	if _, err := mygo.NewTray(mygo.TrayOptions{
-		ID:             "helldriver-main",
+		ID:             "hellauncher-main",
 		Icon:           iconBytes,
 		IconIsTemplate: isTemplate,
 		ToolTip:        tooltip,
@@ -373,9 +373,9 @@ func setupTray(
 }
 
 func formatStatusLabel(isDev bool, trusted bool) string {
-	prefix := "✪ HellDriver"
+	prefix := "✪ HelLauncher"
 	if isDev {
-		prefix = "✪ HellDriver [DEV]"
+		prefix = "✪ HelLauncher [DEV]"
 	}
 	if runtime.GOOS == "darwin" && !trusted {
 		return prefix + " — ⚠️ 等待授予辅助功能权限"

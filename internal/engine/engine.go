@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"helldriver/internal/catalog"
-	"helldriver/internal/sfx"
-	"helldriver/internal/sys"
+	"hellauncher/internal/catalog"
+	"hellauncher/internal/sfx"
+	"hellauncher/internal/sys"
 )
 
 // Phase represents the lifecycle state of the tactical Stratagem engine.

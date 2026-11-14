@@ -21,7 +21,7 @@ import (
 	"github.com/ebitengine/purego/objc"
 	"github.com/egoist/mygo/plugins/permissionflow"
 
-	"helldriver/internal/catalog"
+	"hellauncher/internal/catalog"
 )
 
 const (
@@ -267,7 +267,7 @@ func GuidePermission(ctx context.Context) (bool, error) {
 	return st == permissionflow.Granted, nil
 }
 
-// HasConflictingBundleRunning checks whether another HellDriver bundle (Prod vs Dev) is running.
+// HasConflictingBundleRunning checks whether another HelLauncher bundle (Prod vs Dev) is running.
 func HasConflictingBundleRunning(otherBundleID string) bool {
 	if err := initDarwin(); err != nil {
 		return false
@@ -870,7 +870,7 @@ func acquireFocusedWindowAXDarwin() (uintptr, error) {
 
 	var targetPID int32
 	if axGetPid(appEl, &targetPID) == 0 && targetPID == selfPID {
-		return 0, errors.New("frontmost window belongs to helldriver")
+		return 0, errors.New("frontmost window belongs to hellauncher")
 	}
 
 	var winEl uintptr
@@ -924,7 +924,7 @@ func centerFrontmostWindowDarwin(beacon Point) {
 func closeActiveWindowDarwin() error {
 	winEl, err := acquireFocusedWindowAXDarwin()
 	if err != nil {
-		if strings.Contains(err.Error(), "belongs to helldriver") {
+		if strings.Contains(err.Error(), "belongs to hellauncher") {
 			return nil
 		}
 		return err
