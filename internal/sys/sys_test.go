@@ -46,3 +46,23 @@ func TestFakeRigGatesMouseClicksUntilMouseCaptureEnabled(t *testing.T) {
 		t.Fatalf("unexpected executed calls: %+v", calls)
 	}
 }
+
+func TestExpandDynamicTokensWith(t *testing.T) {
+	// URL query template escapes spaces & special chars.
+	gotURL := sys.ExpandDynamicTokensWith("https://google.com/search?q={clipboard}", "  helldivers 2 reinforce\n", true)
+	if gotURL != "https://google.com/search?q=helldivers+2+reinforce" {
+		t.Fatalf("unexpected URL expansion: %q", gotURL)
+	}
+
+	// Bare {clipboard} holding a URL is NOT double-escaped so open_target opens it directly.
+	gotBare := sys.ExpandDynamicTokensWith("{clipboard}", "https://github.com/egoist/mygo\n", true)
+	if gotBare != "https://github.com/egoist/mygo" {
+		t.Fatalf("unexpected bare clipboard URL expansion: %q", gotBare)
+	}
+
+	// Shell command (allowURLEncode=false) preserves raw text.
+	gotShell := sys.ExpandDynamicTokensWith("echo {clipboard}", "for super earth", false)
+	if gotShell != "echo for super earth" {
+		t.Fatalf("unexpected shell clipboard expansion: %q", gotShell)
+	}
+}

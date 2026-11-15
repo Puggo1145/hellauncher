@@ -35,6 +35,7 @@ func TestVisorLensShaderRendersWithoutArtifacts(t *testing.T) {
 
 func TestDeployingSweepBarStaysClippedWithinStripAcrossCycle(t *testing.T) {
 	loadout := catalog.DefaultSnapshot()
+	loadout.Settings.HUDTheme = catalog.ThemeTactical
 	loadout.Settings.VisorCurved = false
 	snap := engine.Snapshot{
 		Phase:     engine.PhaseDeploying,
@@ -46,7 +47,7 @@ func TestDeployingSweepBarStaysClippedWithinStripAcrossCycle(t *testing.T) {
 
 	tt := ui.NewTester(func(c *ui.Context) {
 		View(c, snap)
-	}, overlayWidth, overlayHeight)
+	}, tacticalWidth, tacticalHeight)
 	tt.Frame()
 	// Let entrance/shift animations settle so strip sits at its steady X bounds.
 	tt.Advance(220 * time.Millisecond)

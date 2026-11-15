@@ -14,6 +14,8 @@ func GuidePermission(_ context.Context) (bool, error) { return true, nil }
 
 func HasConflictingBundleRunning(_ string) bool { return false }
 
+func ShouldBypassFullscreenOrGame() bool { return false }
+
 type stubRig struct{}
 
 func NewPlatformRig() Rig { return &stubRig{} }

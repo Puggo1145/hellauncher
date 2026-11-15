@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"sync"
@@ -34,13 +35,15 @@ const (
 
 // Snapshot is an immutable projection of Engine state consumed by UI views.
 type Snapshot struct {
-	Phase     Phase
-	Typed     []catalog.Dir
-	MatchedID string
-	ErrorSeq  uint32
-	StepSeq   uint32
-	Trusted   bool
-	Loadout   catalog.Snapshot
+	Phase           Phase
+	Typed           []catalog.Dir
+	MatchedID       string
+	ErrorSeq        uint32
+	StepSeq         uint32
+	Trusted         bool
+	Paused          bool
+	HelldiversReady bool
+	Loadout         catalog.Snapshot
 }
 
 // Engine is the core Stratagem runtime state machine Module.
@@ -59,6 +62,12 @@ type Engine struct {
 	errorSeq             uint32
 	stepSeq              uint32
 	trusted              bool
+	paused               bool
+	pinnedPreview        bool
+	shouldBypass         func() bool
+	drillIntercept       func(catalog.Stratagem) bool
+	helldiversReady      bool
+	onMissingHelldivers  func()
 	loadout              catalog.Snapshot
 	timerToken           uint64
 	prevMods             sys.Mods
@@ -137,6 +146,97 @@ func (e *Engine) SetTrusted(trusted bool) {
 	e.mu.Unlock()
 
 	e.publish(snap)
+}
+
+// SetHelldiversReady updates whether HELLDIVERS 2 launch coordinates are detected
+// and notifies HUD subscribers on change.
+func (e *Engine) SetHelldiversReady(ready bool) {
+	e.mu.Lock()
+	if e.helldiversReady == ready {
+		e.mu.Unlock()
+		return
+	}
+	e.helldiversReady = ready
+	snap := e.snapshotLocked()
+	e.mu.Unlock()
+
+	e.publish(snap)
+}
+
+// SetOnMissingHelldivers registers a callback invoked when the user inputs the
+// system "Join the Helldivers" sequence (↑↓→←↑) while no game installation is configured.
+func (e *Engine) SetOnMissingHelldivers(fn func()) {
+	e.mu.Lock()
+	e.onMissingHelldivers = fn
+	e.mu.Unlock()
+}
+
+// SetShouldBypass registers an optional foreground fullscreen/game detector checked
+// when attempting to summon a new Stratagem session.
+func (e *Engine) SetShouldBypass(fn func() bool) {
+	e.mu.Lock()
+	e.shouldBypass = fn
+	e.mu.Unlock()
+}
+
+// SetPinnedPreview keeps the HUD passively visible on the desktop while idle
+// (used during live desktop onboarding calibration & drill) without blocking
+// real hotkey summoning or chord input.
+func (e *Engine) SetPinnedPreview(pinned bool) {
+	e.mu.Lock()
+	if e.pinnedPreview == pinned {
+		e.mu.Unlock()
+		return
+	}
+	e.pinnedPreview = pinned
+	snap := e.snapshotLocked()
+	e.mu.Unlock()
+
+	e.publish(snap)
+}
+
+// SetDrillIntercept registers an optional interceptor called before executing
+// deployed Stratagem OS steps. Returning true skips OS step execution while
+// preserving full HUD deployment animations and sound effects.
+func (e *Engine) SetDrillIntercept(fn func(catalog.Stratagem) bool) {
+	e.mu.Lock()
+	e.drillIntercept = fn
+	e.mu.Unlock()
+}
+
+// SetPaused pauses or resumes global Stratagem hotkey summoning and notifies subscribers.
+func (e *Engine) SetPaused(paused bool) {
+	var disableMouse bool
+	e.mu.Lock()
+	if e.paused == paused {
+		e.mu.Unlock()
+		return
+	}
+	e.paused = paused
+	if paused && (e.phase == PhaseOpen || e.phase == PhaseArmed) {
+		disableMouse = e.phase == PhaseArmed
+		e.timerToken++
+		e.phase = PhaseIdle
+		e.typed = nil
+		e.matchedID = ""
+		e.hasTyped = false
+		e.firstTapStart = time.Time{}
+		e.secondTapDeadline = time.Time{}
+	}
+	snap := e.snapshotLocked()
+	e.mu.Unlock()
+
+	if disableMouse {
+		e.rig.SetMouseCapture(false)
+	}
+	e.publish(snap)
+}
+
+// Paused reports whether global Stratagem hotkey summoning is currently paused.
+func (e *Engine) Paused() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.paused
 }
 
 // SetLoadout atomically applies a new validated Catalog Snapshot, syncs Speaker
@@ -320,7 +420,7 @@ func (e *Engine) handleModifiers(now time.Time, mods sys.Mods) {
 	switch mode {
 	case catalog.ModeHoldLeftCtrl:
 		want := mods.LeftCtrl && !mods.Super && !mods.Alt && !mods.Shift
-		if e.phase != PhaseOpen && !prev.LeftCtrl && want {
+		if e.phase != PhaseOpen && !prev.LeftCtrl && want && e.canOpenSessionLocked() {
 			e.openSessionLocked()
 			opened = true
 			snap = e.snapshotLocked()
@@ -334,7 +434,7 @@ func (e *Engine) handleModifiers(now time.Time, mods sys.Mods) {
 
 	case catalog.ModeRightCtrlOrAlt:
 		want := (mods.RightCtrl || (anyCtrlNow && mods.Alt)) && !mods.Super
-		if e.phase != PhaseOpen && want {
+		if e.phase != PhaseOpen && want && e.canOpenSessionLocked() {
 			e.openSessionLocked()
 			opened = true
 			snap = e.snapshotLocked()
@@ -350,9 +450,11 @@ func (e *Engine) handleModifiers(now time.Time, mods sys.Mods) {
 			if !e.secondTapDeadline.IsZero() && !now.After(e.secondTapDeadline) {
 				e.secondTapDeadline = time.Time{}
 				e.firstTapStart = time.Time{}
-				e.openSessionLocked()
-				opened = true
-				snap = e.snapshotLocked()
+				if e.canOpenSessionLocked() {
+					e.openSessionLocked()
+					opened = true
+					snap = e.snapshotLocked()
+				}
 			} else {
 				e.firstTapStart = now
 				e.hadOtherKeyDuringTap = false
@@ -492,7 +594,7 @@ func (e *Engine) handleKeyDown(ev sys.InputEvent) bool {
 			e.matchedID = exact.ID
 			e.completedWaitRelease = isTriggerHeld(mode, e.prevMods)
 			enableMouse = true
-			cue := sfx.CueArmed
+			cue := sfx.StepCue(len(candidate))
 			playCue = &cue
 			changed = true
 			snap = e.snapshotLocked()
@@ -506,7 +608,7 @@ func (e *Engine) handleKeyDown(ev sys.InputEvent) bool {
 			e.phase = PhaseDeploying
 			e.matchedID = exact.ID
 			e.completedWaitRelease = isTriggerHeld(mode, e.prevMods)
-			cue := sfx.CueReady
+			cue := sfx.StepCue(len(candidate))
 			playCue = &cue
 			changed = true
 			snap = e.snapshotLocked()
@@ -611,7 +713,6 @@ func (e *Engine) handleMouseLeftDown(pt sys.Point) bool {
 	e.mu.Unlock()
 
 	e.rig.SetMouseCapture(false)
-	e.spk.Play(sfx.CueReady)
 	e.publish(snap)
 
 	beacon := pt
@@ -641,13 +742,51 @@ func (e *Engine) handleMouseRightDown() bool {
 
 func (e *Engine) runDeploy(tok uint64, st catalog.Stratagem, beacon *sys.Point) {
 	start := time.Now()
-	for idx, step := range st.Steps {
-		ctx, cancel := context.WithTimeout(context.Background(), executeStepTimeout)
-		err := e.rig.Execute(ctx, step, beacon)
-		cancel()
-		if err != nil {
-			slog.Warn("stratagem step execution failed", "id", st.ID, "step", idx, "kind", step.Kind, "err", err)
+	missingHelldivers := false
+	launchedHelldivers := false
+
+	e.mu.Lock()
+	interceptFn := e.drillIntercept
+	e.mu.Unlock()
+
+	if interceptFn == nil || !interceptFn(cloneStratagem(st)) {
+		for idx, step := range st.Steps {
+			ctx, cancel := context.WithTimeout(context.Background(), executeStepTimeout)
+			err := e.rig.Execute(ctx, step, beacon)
+			cancel()
+			if err != nil {
+				if errors.Is(err, sys.ErrHelldiversMissing) {
+					missingHelldivers = true
+				}
+				slog.Warn("stratagem step execution failed", "id", st.ID, "step", idx, "kind", step.Kind, "err", err)
+			} else if step.Kind == catalog.StepLaunchHelldivers {
+				launchedHelldivers = true
+			}
 		}
+	}
+
+	if missingHelldivers {
+		e.mu.Lock()
+		e.helldiversReady = false
+		onMissing := e.onMissingHelldivers
+		if e.timerToken == tok && e.phase == PhaseDeploying {
+			e.phase = PhaseIdle
+			e.typed = nil
+			e.matchedID = ""
+		}
+		idleSnap := e.snapshotLocked()
+		e.mu.Unlock()
+
+		e.spk.Play(sfx.CueFail)
+		e.publish(idleSnap)
+		if onMissing != nil {
+			onMissing()
+		}
+		return
+	}
+
+	if launchedHelldivers {
+		e.spk.Play(sfx.CueHellpodLaunch)
 	}
 
 	if elapsed := time.Since(start); elapsed < minDeployingFloor {
@@ -681,6 +820,16 @@ func (e *Engine) runDeploy(tok uint64, st catalog.Stratagem, beacon *sys.Point) 
 	})
 }
 
+func (e *Engine) canOpenSessionLocked() bool {
+	if e.paused {
+		return false
+	}
+	if !e.loadout.Settings.DisableGameBypass && e.shouldBypass != nil && e.shouldBypass() {
+		return false
+	}
+	return true
+}
+
 func (e *Engine) openSessionLocked() {
 	e.timerToken++
 	e.phase = PhaseOpen
@@ -707,14 +856,20 @@ func (e *Engine) findEnabledStratagemLocked(id string) (catalog.Stratagem, bool)
 }
 
 func (e *Engine) snapshotLocked() Snapshot {
+	phase := e.phase
+	if phase == PhaseIdle && e.pinnedPreview && !e.paused {
+		phase = PhasePreview
+	}
 	return Snapshot{
-		Phase:     e.phase,
-		Typed:     slices.Clone(e.typed),
-		MatchedID: e.matchedID,
-		ErrorSeq:  e.errorSeq,
-		StepSeq:   e.stepSeq,
-		Trusted:   e.trusted,
-		Loadout:   cloneLoadout(e.loadout),
+		Phase:           phase,
+		Typed:           slices.Clone(e.typed),
+		MatchedID:       e.matchedID,
+		ErrorSeq:        e.errorSeq,
+		StepSeq:         e.stepSeq,
+		Trusted:         e.trusted,
+		Paused:          e.paused,
+		HelldiversReady: e.helldiversReady,
+		Loadout:         cloneLoadout(e.loadout),
 	}
 }
 
@@ -731,13 +886,15 @@ func (e *Engine) publish(snap Snapshot) {
 
 	for _, fn := range listeners {
 		fn(Snapshot{
-			Phase:     snap.Phase,
-			Typed:     slices.Clone(snap.Typed),
-			MatchedID: snap.MatchedID,
-			ErrorSeq:  snap.ErrorSeq,
-			StepSeq:   snap.StepSeq,
-			Trusted:   snap.Trusted,
-			Loadout:   cloneLoadout(snap.Loadout),
+			Phase:           snap.Phase,
+			Typed:           slices.Clone(snap.Typed),
+			MatchedID:       snap.MatchedID,
+			ErrorSeq:        snap.ErrorSeq,
+			StepSeq:         snap.StepSeq,
+			Trusted:         snap.Trusted,
+			Paused:          snap.Paused,
+			HelldiversReady: snap.HelldiversReady,
+			Loadout:         cloneLoadout(snap.Loadout),
 		})
 	}
 }

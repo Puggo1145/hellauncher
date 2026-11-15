@@ -87,6 +87,9 @@ var (
 	cgEventGetIntegerValueField func(event uintptr, field uint32) int64
 	cgEventGetLocation          func(event uintptr) cgPoint
 	cgWindowListCopyWindowInfo  func(option, relativeTo uint32) objc.ID
+	cgMainDisplayID             func() uint32
+	cgDisplayPixelsWide         func(display uint32) uintptr
+	cgDisplayPixelsHigh         func(display uint32) uintptr
 
 	cfMachPortCreateRunLoopSource func(alloc uintptr, port uintptr, order int) uintptr
 	cfRunLoopGetCurrent           func() uintptr
@@ -96,6 +99,7 @@ var (
 	cfStrCreateWithCStr           func(alloc uintptr, cstr *byte, enc uint32) uintptr
 	cfReleaseRef                  func(cf uintptr)
 	kCFRunLoopCommonModesVal      uintptr
+	kCFBooleanTrueVal             uintptr
 
 	sendUint  func(obj objc.ID, s objc.SEL) uint
 	sendInt   func(obj objc.ID, s objc.SEL) int
@@ -178,6 +182,9 @@ func initDarwin() error {
 		bind(&cgEventGetIntegerValueField, cg, "CGEventGetIntegerValueField")
 		bind(&cgEventGetLocation, cg, "CGEventGetLocation")
 		bind(&cgWindowListCopyWindowInfo, cg, "CGWindowListCopyWindowInfo")
+		bind(&cgMainDisplayID, cg, "CGMainDisplayID")
+		bind(&cgDisplayPixelsWide, cg, "CGDisplayPixelsWide")
+		bind(&cgDisplayPixelsHigh, cg, "CGDisplayPixelsHigh")
 
 		bind(&cfMachPortCreateRunLoopSource, cf, "CFMachPortCreateRunLoopSource")
 		bind(&cfRunLoopGetCurrent, cf, "CFRunLoopGetCurrent")
@@ -197,6 +204,9 @@ func initDarwin() error {
 			return
 		}
 		kCFRunLoopCommonModesVal = **(**uintptr)(unsafe.Pointer(&modeSym))
+		if boolSym, be := purego.Dlsym(cf, "kCFBooleanTrue"); be == nil && boolSym != 0 {
+			kCFBooleanTrueVal = **(**uintptr)(unsafe.Pointer(&boolSym))
+		}
 
 		msgSend, e := purego.Dlsym(libobjc, "objc_msgSend")
 		if e != nil {
@@ -545,7 +555,8 @@ func (r *DarwinRig) Execute(ctx context.Context, step catalog.Step, beacon *Poin
 		return closeActiveWindowDarwin()
 
 	case catalog.StepOpenTarget:
-		if err := startDetachedContext(ctx, "/usr/bin/open", step.Target); err != nil {
+		target := ExpandDynamicTokens(step.Target, true)
+		if err := startDetachedContext(ctx, "/usr/bin/open", target); err != nil {
 			return err
 		}
 		if beacon != nil {
@@ -555,12 +566,30 @@ func (r *DarwinRig) Execute(ctx context.Context, step catalog.Step, beacon *Poin
 		return nil
 
 	case catalog.StepRunShortcut:
-		cmd := exec.CommandContext(ctx, "/usr/bin/shortcuts", "run", step.Target)
+		cmd := exec.CommandContext(ctx, "/usr/bin/shortcuts", "run", ExpandDynamicTokens(step.Target, false))
 		return cmd.Run()
 
 	case catalog.StepShellCommand:
-		cmd := exec.CommandContext(ctx, "/bin/zsh", "-lc", step.Target)
+		cmd := exec.CommandContext(ctx, "/bin/zsh", "-lc", ExpandDynamicTokens(step.Target, false))
 		return cmd.Run()
+
+	case catalog.StepSystemAction:
+		return executeSystemActionDarwin(ctx, catalog.SystemAction(strings.TrimSpace(step.Target)))
+
+	case catalog.StepLaunchHelldivers:
+		st := DetectHelldivers(step.Target)
+		if !st.Found {
+			return ErrHelldiversMissing
+		}
+		if st.LaunchURI != "" {
+			if err := startDetachedContext(ctx, "/usr/bin/open", st.LaunchURI); err == nil {
+				return nil
+			}
+		}
+		if st.Path != "" {
+			return startDetachedContext(ctx, "/usr/bin/open", st.Path)
+		}
+		return ErrHelldiversMissing
 
 	default:
 		return fmt.Errorf("sys: unsupported step kind %q", step.Kind)
@@ -781,14 +810,14 @@ func bundleSliceForInstalled(id string, fallbacks []string) []string {
 
 func launchTargetDarwin(ctx context.Context, target string) error {
 	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "files", "finder":
+	case "files", "finder", "explorer", "explorer.exe":
 		home, err := os.UserHomeDir()
 		if err != nil || home == "" {
 			home = "/"
 		}
 		return launchAndWaitDarwin(ctx, []string{home}, []string{"com.apple.finder"}, true)
 
-	case "chrome":
+	case "chrome", "browser":
 		candidates := []string{"com.google.Chrome", "company.thebrowser.Browser", "com.apple.Safari"}
 		if app, ok := findInstalledApp(candidates, []string{"Google Chrome", "Arc", "Safari"}); ok && app.Path != "" {
 			return launchAndWaitDarwin(ctx, []string{app.Path}, bundleSliceForInstalled(app.ID, candidates), false)
@@ -945,4 +974,143 @@ func closeActiveWindowDarwin() error {
 		return fmt.Errorf("AXPress on close button returned %d", rc)
 	}
 	return nil
+}
+
+// ShouldBypassFullscreenOrGame reports whether the frontmost macOS application
+// currently owns a fullscreen window covering the menu bar.
+func ShouldBypassFullscreenOrGame() bool {
+	if err := initDarwin(); err != nil {
+		return false
+	}
+	selfPID := int32(os.Getpid())
+	frontPID := frontmostAppPIDDarwin()
+	if frontPID <= 0 || frontPID == selfPID {
+		return false
+	}
+	disp := cgMainDisplayID()
+	scrW := float64(cgDisplayPixelsWide(disp))
+	scrH := float64(cgDisplayPixelsHigh(disp))
+	if scrW <= 0 || scrH <= 0 {
+		return false
+	}
+
+	bypass := false
+	withPool(func() {
+		list := cgWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly|kCGWindowListExcludeDesktopElements, 0)
+		if list == 0 {
+			return
+		}
+		defer cfReleaseRef(uintptr(list))
+
+		kOwnerPID := nsString("kCGWindowOwnerPID")
+		kBounds := nsString("kCGWindowBounds")
+		kY := nsString("Y")
+		kWidth := nsString("Width")
+		kHeight := nsString("Height")
+
+		count := sendUint(list, selCount)
+		for i := range count {
+			w := list.Send(selObjectAtIndex, i)
+			if w == 0 {
+				continue
+			}
+			vPID := w.Send(selObjectForKey, kOwnerPID)
+			if vPID == 0 || int32(sendInt(vPID, selIntegerValue)) != frontPID {
+				continue
+			}
+			b := w.Send(selObjectForKey, kBounds)
+			if b == 0 {
+				continue
+			}
+			y := sendFloat(b.Send(selObjectForKey, kY), selDoubleValue)
+			width := sendFloat(b.Send(selObjectForKey, kWidth), selDoubleValue)
+			height := sendFloat(b.Send(selObjectForKey, kHeight), selDoubleValue)
+			if y <= 1 && width >= scrW-2 && height >= scrH-2 {
+				bypass = true
+				return
+			}
+		}
+	})
+	return bypass
+}
+
+func placeFocusedWindowDarwin(x, y, w, h float64) error {
+	winEl, err := acquireFocusedWindowAXDarwin()
+	if err != nil || winEl == 0 {
+		return nil
+	}
+	defer cfReleaseRef(winEl)
+
+	pos := cgPoint{X: x, Y: y}
+	posVal := axValueCreate(kAXValueCGPointType, &pos)
+	if posVal != 0 {
+		attrPos := makeCFString("AXPosition")
+		_ = axSetAttributeValue(winEl, attrPos, posVal)
+		cfReleaseRef(attrPos)
+		cfReleaseRef(posVal)
+	}
+
+	sz := cgPoint{X: w, Y: h}
+	szVal := axValueCreate(kAXValueCGSizeType, &sz)
+	if szVal != 0 {
+		attrSize := makeCFString("AXSize")
+		_ = axSetAttributeValue(winEl, attrSize, szVal)
+		cfReleaseRef(attrSize)
+		cfReleaseRef(szVal)
+	}
+	return nil
+}
+
+func executeSystemActionDarwin(ctx context.Context, act catalog.SystemAction) error {
+	const menuBarH = 25.0
+	disp := cgMainDisplayID()
+	scrW := float64(cgDisplayPixelsWide(disp))
+	scrH := float64(cgDisplayPixelsHigh(disp))
+	if scrW <= 0 {
+		scrW = 1440
+	}
+	if scrH <= menuBarH {
+		scrH = 900
+	}
+	workH := scrH - menuBarH
+
+	switch act {
+	case catalog.SysWinLeft:
+		return placeFocusedWindowDarwin(0, menuBarH, math.Floor(scrW/2), workH)
+	case catalog.SysWinRight:
+		half := math.Floor(scrW / 2)
+		return placeFocusedWindowDarwin(half, menuBarH, scrW-half, workH)
+	case catalog.SysWinMaximize:
+		return placeFocusedWindowDarwin(0, menuBarH, scrW, workH)
+	case catalog.SysWinCenter:
+		w := math.Floor(scrW * 0.74)
+		h := math.Floor(workH * 0.78)
+		return placeFocusedWindowDarwin(math.Floor((scrW-w)/2), menuBarH+math.Floor((workH-h)/2), w, h)
+	case catalog.SysWinMinimize:
+		winEl, err := acquireFocusedWindowAXDarwin()
+		if err != nil || winEl == 0 || kCFBooleanTrueVal == 0 {
+			return nil
+		}
+		defer cfReleaseRef(winEl)
+		attrMin := makeCFString("AXMinimized")
+		defer cfReleaseRef(attrMin)
+		_ = axSetAttributeValue(winEl, attrMin, kCFBooleanTrueVal)
+		return nil
+	case catalog.SysShowDesktop:
+		return exec.CommandContext(ctx, "/usr/bin/open", "-a", "Mission Control", "--args", "1").Run()
+	case catalog.SysLockScreen:
+		return exec.CommandContext(ctx, "/usr/bin/osascript", "-e", `tell application "System Events" to keystroke "q" using {control down, command down}`).Run()
+	case catalog.SysScreenshot:
+		return startDetachedContext(ctx, "/usr/sbin/screencapture", "-i", "-c")
+	case catalog.SysMediaPlayPause:
+		return exec.CommandContext(ctx, "/usr/bin/osascript", "-e", `tell application "Music" to if it is running then playpause`).Run()
+	case catalog.SysVolumeMute:
+		return exec.CommandContext(ctx, "/usr/bin/osascript", "-e", `set volume output muted not (output muted of (get volume settings))`).Run()
+	case catalog.SysTaskManager:
+		return startDetachedContext(ctx, "/usr/bin/open", "-a", "Activity Monitor")
+	case catalog.SysEmptyTrash:
+		return exec.CommandContext(ctx, "/usr/bin/osascript", "-e", `tell application "Finder" to empty trash`).Run()
+	default:
+		return fmt.Errorf("sys: unknown system action %q", act)
+	}
 }

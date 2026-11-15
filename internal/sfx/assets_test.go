@@ -49,7 +49,38 @@ func TestEmbeddedGameAssetsDecodeAndTrimCleanly(t *testing.T) {
 		}
 	}
 
-	if spk.ready == nil || spk.ready.Duration() < 500*time.Millisecond {
-		t.Fatalf("ready sound failed to decode or too short: %v", spk.ready)
+	if spk.hellpodLockSnd == nil {
+		t.Fatal("hellpodLockSnd failed to decode embedded hellpod-lock-in.mp3")
+	}
+	if d := spk.hellpodLockSnd.Duration(); d < 1500*time.Millisecond || d > 3500*time.Millisecond {
+		t.Fatalf("unexpected hellpodLockSnd duration %v", d)
+	}
+
+	if spk.hellpodDropSnd == nil {
+		t.Fatal("hellpodDropSnd failed to decode embedded hellpod-drop.mp3")
+	}
+	if d := spk.hellpodDropSnd.Duration(); d < 18*time.Second || d > 19*time.Second {
+		t.Fatalf("expected hellpodDropSnd windowed decode ~18.5s, got %v", d)
+	}
+
+	if spk.onboardingIntroSnd == nil {
+		t.Fatal("onboardingIntroSnd failed to decode embedded onboarding-intro.mp3")
+	}
+	if d := spk.onboardingIntroSnd.Duration(); d < 16*time.Second || d > 18*time.Second {
+		t.Fatalf("expected onboardingIntroSnd windowed decode ~17.2s, got %v", d)
+	}
+
+	if spk.joinHelldiversSnd == nil {
+		t.Fatal("joinHelldiversSnd failed to decode embedded join-helldivers.mp3")
+	}
+	if d := spk.joinHelldiversSnd.Duration(); d < 2*time.Second || d > 4*time.Second {
+		t.Fatalf("unexpected joinHelldiversSnd duration %v", d)
+	}
+
+	if spk.missionCompleteSnd == nil {
+		t.Fatal("missionCompleteSnd failed to decode embedded mission-complete.mp3")
+	}
+	if d := spk.missionCompleteSnd.Duration(); d < 3500*time.Millisecond || d > 5*time.Second {
+		t.Fatalf("unexpected missionCompleteSnd duration %v", d)
 	}
 }

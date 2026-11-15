@@ -5,10 +5,11 @@
   "scripts": {
     "dev": "mygo dev",
     "check": "node scripts/check.mjs",
-    "test": "CGO_ENABLED=0 go test -race ./...",
+    "test": "node scripts/test.mjs",
     "e2e": "node scripts/e2e/smoke.mjs",
     "build": "mygo build",
     "build:win": "mygo build -platform windows/amd64 -skip-installer",
+    "installer:win": "mygo build -platform windows/amd64",
     "build:all": "mygo build -platform darwin/arm64,windows/amd64 -skip-installer"
   },
   "devDependencies": {

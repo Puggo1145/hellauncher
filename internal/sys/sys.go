@@ -2,6 +2,9 @@ package sys
 
 import (
 	"context"
+	"net/url"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -122,6 +125,21 @@ func InstalledApps() []mygo.InstalledApp {
 		}
 	}()
 
+	if runtime.GOOS == "windows" {
+		hasExplorer := false
+		for _, a := range apps {
+			if strings.EqualFold(a.ID, "explorer.exe") || strings.EqualFold(filepath.Base(a.Path), "explorer.exe") {
+				hasExplorer = true
+				break
+			}
+		}
+		if !hasExplorer {
+			apps = append([]mygo.InstalledApp{
+				{ID: "explorer.exe", Name: "Windows Explorer", Path: "explorer.exe"},
+			}, apps...)
+		}
+	}
+
 	if len(apps) > 0 {
 		appsCacheMu.Lock()
 		appsCacheVal = slices.Clone(apps)
@@ -157,4 +175,36 @@ func findInstalledApp(ids []string, names []string) (mygo.InstalledApp, bool) {
 		}
 	}
 	return mygo.InstalledApp{}, false
+}
+
+// ExpandDynamicTokens substitutes {clipboard} and {clipboard_raw} placeholders
+// using the current OS text clipboard when present in raw.
+func ExpandDynamicTokens(raw string, allowURLEncode bool) string {
+	if !strings.Contains(raw, "{clipboard") {
+		return raw
+	}
+	var clip string
+	func() {
+		defer func() { _ = recover() }()
+		clip = mygo.Clipboard.ReadText()
+	}()
+	return ExpandDynamicTokensWith(raw, clip, allowURLEncode)
+}
+
+// ExpandDynamicTokensWith expands {clipboard} and {clipboard_raw} with an explicit
+// clipboard value (exposed for deterministic unit tests).
+func ExpandDynamicTokensWith(raw string, clipText string, allowURLEncode bool) string {
+	if !strings.Contains(raw, "{clipboard") {
+		return raw
+	}
+	clean := strings.TrimSpace(clipText)
+	out := strings.ReplaceAll(raw, "{clipboard_raw}", clean)
+	if !strings.Contains(out, "{clipboard}") {
+		return out
+	}
+	templateWithoutToken := strings.ReplaceAll(out, "{clipboard}", "")
+	if allowURLEncode && strings.Contains(templateWithoutToken, "://") {
+		return strings.ReplaceAll(out, "{clipboard}", url.QueryEscape(clean))
+	}
+	return strings.ReplaceAll(out, "{clipboard}", clean)
 }
